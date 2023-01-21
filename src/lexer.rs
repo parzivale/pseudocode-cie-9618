@@ -57,6 +57,7 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
 
         let ident = text::ident().map(|ident: String| match ident.as_str() {
             "FUNCTION" => Token::Keyword("FUNCTION".into()),
+            "CALL" => Token::Keyword("CALL".into()),
             "RETURNS" => Token::Keyword("RETURNS".into()),
             "ENDFUNCTION" => Token::Keyword("ENDFUNCTION".into()),
             "DECLARE" => Token::Keyword("DECLARE".into()),
@@ -94,8 +95,6 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
             _ => Token::Ident(ident),
         });
 
-        let end = end::<Simple<char>>().to(Token::End);
-
         let token = num
             .clone()
             .or(char_.clone())
@@ -103,7 +102,6 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
             .or(op.clone())
             .or(ident.clone())
             .or(ctrl.clone())
-            //.or(end)
             .map(TokenTree::Token);
 
         let token_tree = tt

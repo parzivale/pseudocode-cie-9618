@@ -41,22 +41,17 @@ pub enum BinaryOp {
 pub enum Expr {
     Error,
     Value(Value),
-    Local(String),
+    Var(String),
     Array(Vec<Spanned<Self>>),
-    DeclarePrim(String, String, Box<Option<Spanned<Self>>>),
-    DeclareArr(
-        String,
-        Box<Spanned<Self>>,
-        Box<Spanned<Self>>,
-        String,
-        Box<Option<Spanned<Self>>>,
-    ),
-    Assign(String, Box<Spanned<Self>>, Box<Option<Spanned<Self>>>),
+    DeclarePrim(String, String, Box<Spanned<Self>>),
+    DeclareArr(String, Box<Self>, Box<Self>, String, Box<Spanned<Self>>),
+    DeclareComp(String, Vec<(String, String)>, Box<Spanned<Self>>),
+    Assign(String, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Index(
         String,
         Box<Spanned<Self>>,
         Box<Spanned<Self>>,
-        Box<Option<Spanned<Self>>>,
+        Box<Spanned<Self>>,
     ),
     Then(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Binary(Box<Spanned<Self>>, BinaryOp, Box<Spanned<Self>>),
@@ -97,34 +92,63 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
 
             let declare_prim = just(Token::Keyword("DECLARE".to_string()))
                 .ignore_then(ident)
+                .then_ignore(just(Token::Ctrl(':')))
                 .then(type_)
-                .then(expr.clone().or_not())
-                .map(|((name, t), body)| Expr::DeclarePrim(name, t, Box::new(body)))
                 .labelled("Declare_prim");
 
-            let declare_arr = just(Token::Keyword("DECLARE".to_string()))
-                .ignore_then(ident)
-                .then_ignore(just(Token::Ctrl(':')))
-                .then_ignore(type_)
+            let declare_arr = declare_prim
+                .clone()
                 .then_ignore(just(Token::Ctrl('[')))
-                .then(raw_expr.clone())
+                .then(val.clone())
                 .then_ignore(just(Token::Ctrl(':')))
-                .then(raw_expr.clone())
+                .then(val.clone())
                 .then_ignore(just(Token::Ctrl(']')))
                 .then_ignore(just(Token::Keyword("OF".to_string())))
                 .then(type_)
                 .then(expr.clone().or_not())
-                .map(|((((name, val1), val2), t), body)| {
-                    Expr::DeclareArr(name, Box::new(val1), Box::new(val2), t, Box::new(body))
+                .map_with_span(|((((name, val1), val2), t), body), span| {
+                    let body = match body {
+                        Some(t) => t,
+                        None => (Expr::Value(Value::Null), span),
+                    };
+                    Expr::DeclareArr(name.0, Box::new(val1), Box::new(val2), t, Box::new(body))
                 })
                 .labelled("Declare_arr");
+
+            let declare_comp = just(Token::Keyword("TYPE".to_string()))
+                .ignore_then(ident.clone())
+                .then(
+                    declare_prim
+                        .clone()
+                        .repeated()
+                        .delimited_by(
+                            just(Token::Open(Delim::Block)),
+                            just(Token::Close(Delim::Block)),
+                        )
+                        .collect::<Vec<_>>(),
+                )
+                .then_ignore(just(Token::Keyword("ENDTYPE".to_string())))
+                .then(expr.clone().or_not())
+                .map_with_span(|((name, items), body), span| {
+                    let body = match body {
+                        Some(t) => t,
+                        None => (Expr::Value(Value::Null), span),
+                    };
+                    Expr::DeclareComp(name, items, Box::new(body))
+                });
 
             let assign = ident
                 .clone()
                 .then_ignore(just(Token::Op("<-".to_string())))
                 .then(raw_expr.clone())
                 .then(expr.clone().or_not())
-                .map(|((name, v), body)| Expr::Assign(name, Box::new(v), Box::new(body)))
+                .map_with_span(|((name, v), body), span| {
+                    let body = match body {
+                        Some(t) => t,
+                        None => (Expr::Value(Value::Null), span),
+                    };
+                    Expr::Assign(name, Box::new(v), Box::new(body))
+                })
                 .labelled("assign");
 
             let index = ident
@@ -137,8 +161,12 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
                 .then_ignore(just(Token::Op("<-".to_string())))
                 .then(raw_expr.clone())
                 .then(expr.clone().or_not())
-                .map(|(((name, v1), v2), body)| {
-                    (Expr::Index(name, Box::new(v1), Box::new(v2), Box::new(body)))
+                .map_with_span(|(((name, v1), v2), body), span| {
+                    let body = match body {
+                        Some(t) => t,
+                        None => (Expr::Value(Value::Null), span),
+                    };
+                    Expr::Index(name, Box::new(v1), Box::new(v2), Box::new(body))
                 });
 
             let items = expr
@@ -152,11 +180,20 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
                 .map(Expr::Array);
 
             let atom = val
-                .or(declare_prim)
                 .or(declare_arr)
+                .or(declare_comp)
+                .or(declare_prim.then(expr.clone().or_not()).map_with_span(
+                    |((name, t), body), span| {
+                        let body = match body {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span),
+                        };
+                        Expr::DeclarePrim(name, t, Box::new(body))
+                    },
+                ))
                 .or(assign)
                 .or(index)
-                .or(ident.map(Expr::Local))
+                .or(ident.map(Expr::Var))
                 .or(list)
                 .labelled("atom")
                 .map_with_span(|expr, span| (expr, span))
@@ -165,7 +202,12 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
                     just(Token::Close(Delim::Paren)),
                 ));
 
-            let call = atom
+            let call_keyword = atom
+                .clone()
+                .or(just(Token::Keyword("CALL".to_string())).ignore_then(atom.clone()))
+                .labelled("call_kw");
+
+            let call = call_keyword
                 .then(
                     items
                         .delimited_by(
@@ -238,7 +280,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
                 .then_ignore(just(Token::Keyword("THEN".to_string())))
                 .then(block.clone())
                 .then(
-                    just(Token::Keyword("Else".to_string()))
+                    just(Token::Keyword("ELSE".to_string()))
                         .ignore_then(block.clone().or(if_))
                         .or_not(),
                 )
@@ -271,22 +313,6 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
             });
 
         block_chain.or(raw_expr.clone())
-        //.then(expr.or_not().repeated())
-        //.foldl(|a, b| {
-        //    let a_start = a.1.start;
-        //    let b_end = b.as_ref().map(|b| b.1.end).unwrap_or(a.1.end);
-        //    (
-        //        Expr::Then(
-        //            Box::new(a),
-        //            Box::new(match b {
-        //                Some(b) => b,
-        //                // Since there is no b expression then its span is empty.
-        //                None => (Expr::Value(Value::Null), b_end..b_end),
-        //            }),
-        //        ),
-        //        a_start..b_end,
-        //    )
-        //})
     })
     .then_ignore(end())
 }
