@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     lexer::{Delim, Token},
@@ -14,6 +14,56 @@ pub enum Value {
     Str(String),
     Array(Vec<Value>),
     Func(String),
+}
+
+impl Value {
+    pub fn is_null(&self) -> bool {
+        match self {
+            Value::Null => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_bool(&self) -> bool {
+        match self {
+            Value::Bool(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_int(&self) -> bool {
+        match self {
+            Value::Int(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_real(&self) -> bool {
+        match self {
+            Value::Real(_) => true,
+            _ => false,
+        }
+    }
+    pub fn is_str(&self) -> bool {
+        match self {
+            Value::Str(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Array(s) => write!(f, "{:?}", s),
+            Value::Null => write!(f, "Null"),
+            Value::Int(s) => write!(f, "{:?}", s),
+            Value::Real(s) => write!(f, "{:?}", s),
+            Value::Bool(s) => write!(f, "{:?}", s),
+            Value::Func(s) => write!(f, "{:?}", s),
+            Value::Str(s) => write!(f, "{:?}", s),
+        }
+    }
 }
 
 // A function node in the AST.
@@ -60,11 +110,11 @@ pub enum Expr {
     For(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     While(Box<Spanned<Self>>),
     Repeat(Box<Spanned<Self>>),
-    Output(Box<Spanned<Self>>),
+    Output(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Input(String),
 }
 
-pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
+pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
     recursive(|expr| {
         let raw_expr = recursive(|raw_expr| {
             let val = select! {
@@ -174,10 +224,16 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
                 .separated_by(just(Token::Ctrl(',')))
                 .allow_trailing();
 
-            let list = items
-                .clone()
-                .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
-                .map(Expr::Array);
+            let output = just(Token::Keyword("OUTPUT".to_string()))
+                .ignore_then(raw_expr.clone())
+                .then(expr.clone().or_not())
+                .map_with_span(|(val, body), span| {
+                    let body = match body {
+                        Some(t) => t,
+                        None => (Expr::Value(Value::Null), span),
+                    };
+                    Expr::Output(Box::new(val), Box::new(body))
+                });
 
             let atom = val
                 .or(declare_arr)
@@ -193,8 +249,8 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>>
                 ))
                 .or(assign)
                 .or(index)
+                .or(output)
                 .or(ident.map(Expr::Var))
-                .or(list)
                 .labelled("atom")
                 .map_with_span(|expr, span| (expr, span))
                 .or(expr.clone().delimited_by(

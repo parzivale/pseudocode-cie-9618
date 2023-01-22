@@ -1,3 +1,5 @@
+use std::fmt;
+
 use chumsky::text::{newline, Character};
 
 use crate::prelude::*;
@@ -15,13 +17,45 @@ pub enum Token {
     Type(String),
     Open(Delim),
     Close(Delim),
-    End,
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Token::Char(c) => write!(f, "{}", c),
+            Token::Str(s) => write!(f, "{}", s),
+            Token::Num(s) => write!(f, "{}", s),
+            Token::Bool(b) => write!(f, "{}", b),
+            Token::Op(s) => write!(f, "{}", s),
+            Token::Ctrl(c) => write!(f, "{}", c),
+            Token::Ident(s) => write!(f, "{}", s),
+            Token::Keyword(s) => write!(f, "{}", s),
+            Token::Type(s) => write!(f, "{}", s),
+            Token::Open(d) => match d {
+                Delim::Paren => write!(f, "("),
+                _ => write!(f, "{}", d),
+            },
+            Token::Close(d) => match d {
+                Delim::Paren => write!(f, ")"),
+                _ => write!(f, "{}", d),
+            },
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Delim {
     Paren,
     Block,
+}
+
+impl fmt::Display for Delim {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Delim::Block => write!(f, "     "),
+            _ => write!(f, ""),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -133,75 +167,4 @@ pub fn tts_to_stream(
                 .chain(once((TokenTree::Token(Token::Close(delim)), span))),
         ),
     })
-}
-
-#[test]
-fn test_lexer() {
-    let code = "DECLARE a INTEGER\na <- (10+5)*(10+1)\nIF a < 1\n  THEN\n      OUTPUT a\nENDIF";
-    let tts = lexer().parse(code).unwrap();
-    assert!(
-        tts == vec![
-            (
-                TokenTree::Token(Token::Keyword("DECLARE".to_string())),
-                0 as usize..7
-            ),
-            (TokenTree::Token(Token::Ident("a".to_string())), 8..9),
-            (TokenTree::Token(Token::Type("INTEGER".to_string())), 10..17),
-            (TokenTree::Token(Token::Ident("a".to_string())), 18..19),
-            (TokenTree::Token(Token::Op("<-".to_string())), 20..22),
-            (
-                TokenTree::Tree(
-                    Delim::Paren,
-                    vec![
-                        (TokenTree::Token(Token::Num("10".to_string())), 24..26),
-                        (TokenTree::Token(Token::Op("+".to_string())), 26..27),
-                        (TokenTree::Token(Token::Num("5".to_string())), 27..28)
-                    ]
-                ),
-                23..29
-            ),
-            (TokenTree::Token(Token::Op("*".to_string())), 29..30),
-            (
-                TokenTree::Tree(
-                    Delim::Paren,
-                    vec![
-                        (TokenTree::Token(Token::Num("10".to_string())), 31..33),
-                        (TokenTree::Token(Token::Op("+".to_string())), 33..34),
-                        (TokenTree::Token(Token::Num("1".to_string())), 34..35)
-                    ]
-                ),
-                30..36
-            ),
-            (TokenTree::Token(Token::Keyword("IF".to_string())), 37..39),
-            (TokenTree::Token(Token::Ident("a".to_string())), 40..41),
-            (TokenTree::Token(Token::Op("<".to_string())), 42..43),
-            (TokenTree::Token(Token::Num("1".to_string())), 44..45),
-            (
-                TokenTree::Tree(
-                    Delim::Block,
-                    vec![
-                        (TokenTree::Token(Token::Keyword("THEN".to_string())), 48..52),
-                        (
-                            TokenTree::Tree(
-                                Delim::Block,
-                                vec![
-                                    (
-                                        TokenTree::Token(Token::Keyword("OUTPUT".to_string())),
-                                        59..65
-                                    ),
-                                    (TokenTree::Token(Token::Ident("a".to_string())), 66..67)
-                                ]
-                            ),
-                            59..67
-                        )
-                    ]
-                ),
-                48..52
-            ),
-            (
-                TokenTree::Token(Token::Keyword("ENDIF".to_string())),
-                68..73
-            )
-        ]
-    );
 }

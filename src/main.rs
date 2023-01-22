@@ -1,25 +1,103 @@
+use std::collections::HashMap;
+
+use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
+
+mod eval;
 mod lexer;
 mod parser;
 mod prelude;
+use eval::*;
 use lexer::*;
 use parser::*;
 use prelude::*;
 
 fn main() {
-    let code = "DECLARE a:ARRAY[1:30] OF STRING\nDECLARE n:INTEGER\nTYPE m\n    DECLARE subm : INTEGER\nENDTYPE\na[1] <- 0\ni <- ((1+2+1-2)*4)\nIF i < 1\n     THEN\n      i <- i + 1\n     ELSE\n      i <- 1\nENDIF";
+    let code = "DECLARE a:INTEGER\nOUTPUT a";
 
-    let tts = lexer().parse(code).unwrap();
+    let (tokens, mut errs) = lexer().parse_recovery(code);
 
-    println!("--- Token Trees ---\n{:#?}\n", tts);
+    let parse_errs = if let Some(tokens) = tokens {
+        let eoi = 0..code.chars().count();
+        let token_stream = tts_to_stream(eoi, tokens);
 
-    let eoi = 0..code.chars().count();
-    let mut token_stream = tts_to_stream(eoi, tts);
+        let (ast, parse_errs) = parser().parse_recovery(token_stream);
 
-    let flattened_trees = token_stream.fetch_tokens().collect::<Vec<_>>();
+        match eval(&ast.unwrap(), &mut HashMap::new(), &mut Vec::new()) {
+            Ok(_) => println!("Ran Successfully!"),
+            Err(e) => errs.push(Simple::custom(e.span, e.msg)),
+        }
+        parse_errs
+    } else {
+        Vec::new()
+    };
 
-    println!("--- Flattened Token Trees ---\n{:?}\n", flattened_trees);
+    errs.into_iter()
+        .map(|e| e.map(|c| c.to_string()))
+        .chain(parse_errs.into_iter().map(|e| e.map(|tok| tok.to_string())))
+        .for_each(|e| {
+            let report = Report::build(ReportKind::Error, (), e.span().start);
 
-    let pst = expr_parser().parse(token_stream).unwrap();
+            let report = match e.reason() {
+                chumsky::error::SimpleReason::Unclosed { span, delimiter } => report
+                    .with_message(format!(
+                        "Unclosed delimiter {}",
+                        delimiter.fg(Color::Yellow)
+                    ))
+                    .with_label(
+                        Label::new(span.clone())
+                            .with_message(format!(
+                                "Unclosed delimiter {}",
+                                delimiter.fg(Color::Yellow)
+                            ))
+                            .with_color(Color::Yellow),
+                    )
+                    .with_label(
+                        Label::new(e.span())
+                            .with_message(format!(
+                                "Must be closed before this {}",
+                                e.found()
+                                    .unwrap_or(&"end of file".to_string())
+                                    .fg(Color::Red)
+                            ))
+                            .with_color(Color::Red),
+                    ),
+                chumsky::error::SimpleReason::Unexpected => report
+                    .with_message(format!(
+                        "{}, expected {}",
+                        if e.found().is_some() {
+                            "Unexpected token in input"
+                        } else {
+                            "Unexpected end of input"
+                        },
+                        if e.expected().len() == 0 {
+                            "something else".to_string()
+                        } else {
+                            e.expected()
+                                .map(|expected| match expected {
+                                    Some(expected) => expected.to_string(),
+                                    None => "end of input".to_string(),
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    ))
+                    .with_label(
+                        Label::new(e.span())
+                            .with_message(format!(
+                                "Unexpected token {}",
+                                e.found()
+                                    .unwrap_or(&"end of file".to_string())
+                                    .fg(Color::Red)
+                            ))
+                            .with_color(Color::Red),
+                    ),
+                chumsky::error::SimpleReason::Custom(msg) => report.with_message(msg).with_label(
+                    Label::new(e.span())
+                        .with_message(format!("{}", msg.fg(Color::Red)))
+                        .with_color(Color::Red),
+                ),
+            };
 
-    println!("--- Parse Tree ---\n{:#?}", pst);
+            report.finish().print(Source::from(&code)).unwrap();
+        });
 }
