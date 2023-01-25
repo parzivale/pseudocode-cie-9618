@@ -79,7 +79,7 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
 
         let char_ = just::<_, _, Simple<char>>('\'')
             .ignore_then(filter(|c| *c != '\''))
-            .then_ignore(just('"'))
+            .then_ignore(just('\''))
             .map(Token::Char);
         let ctrl = one_of::<_, _, Simple<char>>(":,.[]").map(|c| Token::Ctrl(c));
 
@@ -117,9 +117,9 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
             "BYVAL" => Token::Keyword("BYVAL".into()),
             "CASE OF" => Token::Keyword("CASE OF".into()),
             "OTHERWISE" => Token::Keyword("OTHERWISE".into()),
-            "TYPE" => Token::Keyword("TYPE".into()),
             "ENDTYPE" => Token::Keyword("ENDTYPE".into()),
             "OF" => Token::Keyword("OF".into()),
+            "TYPE" => Token::Keyword("TYPE".into()),
             "ARRAY" => Token::Type("ARRAY".into()),
             "BOOLEAN" => Token::Type("BOOLEAN".into()),
             "INTEGER" => Token::Type("INTEGER".into()),
