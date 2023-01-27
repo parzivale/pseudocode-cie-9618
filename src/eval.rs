@@ -1,20 +1,86 @@
 use std::collections::HashMap;
 
 use crate::{
-    parser::{BinaryOp, Expr, Value},
+    parser::{ArgMode, BinaryOp, Expr, Value},
     prelude::*,
 };
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Func {
+    args: Vec<((ArgMode, String), String)>,
+    body: Box<Spanned<Expr>>,
+    returns: String,
+}
+
+#[derive(Debug, Clone)]
 pub enum Types {
     Composite(HashMap<String, String>),
     Enumerated(Vec<String>),
+    Func(Func),
     Real,
     String,
     Integer,
     Boolean,
     Char,
     Null,
+}
+
+impl PartialEq for Types {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::Composite(_) => match other {
+                Self::Composite(_) => true,
+                _ => false,
+            },
+            Self::Enumerated(_) => match other {
+                Self::Enumerated(_) => true,
+                _ => false,
+            },
+            Self::Func(_) => match other {
+                Self::Func(_) => true,
+                _ => false,
+            },
+            Self::Real => match other {
+                Self::Real => true,
+                _ => false,
+            },
+            Self::String => match other {
+                Self::String => true,
+                _ => false,
+            },
+            Self::Integer => match other {
+                Self::Integer => true,
+                _ => false,
+            },
+            Self::Boolean => match other {
+                Self::Boolean => true,
+                _ => false,
+            },
+            Self::Char => match other {
+                Self::Char => true,
+                _ => false,
+            },
+            Self::Null => match other {
+                Self::Null => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl ToString for Types {
+    fn to_string(&self) -> String {
+        match self {
+            Real => "REAL".to_string(),
+            String => "STRING".to_string(),
+            Integer => "INTEGER".to_string(),
+            Boolean => "BOOLEAN".to_string(),
+            Char => "CHAR".to_string(),
+            Null => "NULL".to_string(),
+            _ => "NULL".to_string(),
+        }
+    }
 }
 
 impl From<Value> for Types {
@@ -25,6 +91,7 @@ impl From<Value> for Types {
             Value::Str(_) => Self::String,
             Value::Real(_) => Self::Real,
             Value::Int(_) => Self::Integer,
+            Value::Comp(_) => Self::Composite(HashMap::new()),
             _ => Self::Null,
         }
     }
@@ -64,24 +131,30 @@ pub fn eval<'a>(
                     Value::Comp(local_hash) => {
                         let key = eval(sub, vars, types)?;
                         let key = match key {
-                            Value::Str(s) => s,
+                            Value::Str(s) => Some(s),
+                            Value::Null => None,
                             _ => {
                                 return Err(Error {
                                     span: expr.1.clone(),
                                     msg: format!(
-                                        "Cannot access composite type '{}' with non string",
-                                        name
+                                        "Cannot access composite type '{}' with non string '{}'",
+                                        name, key
                                     ),
                                 })
                             }
                         };
-                        local_hash
-                            .get(&key)
-                            .ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!("Field is not initalized on '{}'", name),
-                            })?
-                            .to_owned()
+
+                        if let Some(key) = key {
+                            local_hash
+                                .get(&key)
+                                .ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Field is not initalized on '{}'", name),
+                                })?
+                                .to_owned()
+                        } else {
+                            Value::Comp(local_hash)
+                        }
                     }
                     _ => {
                         return Err(Error {
@@ -99,7 +172,6 @@ pub fn eval<'a>(
         Expr::DeclarePrim(name, type_, then) => {
             vars.insert(name.clone(), (type_.clone(), None));
             let output = eval(then, vars, types);
-            vars.remove(name);
             output?
         }
         Expr::Assign(name, rhs, then) => {
@@ -245,10 +317,8 @@ pub fn eval<'a>(
                     unreachable!()
                 }
             };
-            println!("{:?}", vars);
             vars.insert(name.0.clone(), (str_type.clone(), Some(rhs)));
             let output = eval(then, vars, types);
-            vars.remove(&name.0);
             output?
         }
         Expr::Binary(a, BinaryOp::Add, b) => {
@@ -272,7 +342,7 @@ pub fn eval<'a>(
                     } else {
                         return Err(Error {
                             span: expr.1.clone(),
-                            msg: format!("cannot mutliply {} to {} due to confilcting types", a, b),
+                            msg: format!("cannot add {} to {} due to confilcting types", a, b),
                         });
                     }
                 }
@@ -422,9 +492,103 @@ pub fn eval<'a>(
             let output = eval(body, vars, types);
             output?
         }
-        Expr::Func(name, args, type_, body) => {
+        Expr::Func(name, args, type_, body, then) => {
+            types.insert(
+                name.to_string(),
+                Types::Func(Func {
+                    args: args.clone(),
+                    body: body.clone(),
+                    returns: type_.clone(),
+                }),
+            );
+            vars.insert(
+                name.to_string(),
+                (name.to_string(), Some(Value::Func(name.to_string()))),
+            );
+            eval(then, vars, types)?
+        }
+        Expr::Call(func, args) => {
+            let ctypes = types.clone();
+            let func = ctypes.get(&func.clone()).ok_or_else(|| Error {
+                span: expr.1.clone(),
+                msg: format!("function '{}' has not been declared", func),
+            })?;
+
+            match func {
+                Types::Func(f) => {
+                    if args.len() != f.args.len() {
+                        return Err(Error{
+                            span: expr.1.clone(),
+                            msg: format!("arg count mismatch between definition and call. Expected {} args got {}", f.args.len(), args.len())
+                        });
+                    }
+                    let mut vars_func = HashMap::new();
+                    let mut reference = Vec::new();
+                    for (n, i) in args.iter().enumerate() {
+                        let name = match &i.0 {
+                            Expr::Var(n, _) => Some(n),
+                            _ => None,
+                        };
+                        let t_def = f.args.get(n).unwrap().clone();
+                        let t_type = types.get(&t_def.1).ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: format!("Type '{}' is not declared", t_def.1),
+                        })?;
+                        let v_type = Types::from(eval(i, vars, &mut types.clone())?);
+
+                        if *t_type != v_type {
+                            return Err(Error {
+                                span: expr.1.clone(),
+                                msg: format!(
+                                    "Type '{:?}' does not match type '{:?}'",
+                                    t_type, v_type
+                                ),
+                            });
+                        }
+
+                        vars_func
+                            .insert((t_def.0).1.clone(), (t_def.1, Some(eval(i, vars, types)?)));
+                        match (t_def.0).0 {
+                            ArgMode::Byref => {
+                                if let Some(name) = name {
+                                    reference.push((name, (t_def.0).1));
+                                }
+                            }
+                            _ => {}
+                        };
+                    }
+                    let output = eval(&f.body, &mut vars_func, types);
+                    for i in reference {
+                        if let Some(v) = vars_func.get(&i.1) {
+                            vars.insert(i.0.to_string(), v.clone());
+                        }
+                    }
+                    let output = output?.clone();
+                    let return_type = types.get(&f.returns).unwrap();
+                    if return_type.clone() == Types::from(output.clone()) {
+                        output
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "Type '{:?}' does not match return type type '{:?}'",
+                                Types::from(output.clone()),
+                                return_type.clone()
+                            ),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("identifier '{:?}' is not a function", func),
+                    })
+                }
+            }
+        }
+        Expr::Return(v) => eval(v, vars, types)?,
+        _ => {
             todo!()
         }
-        _ => todo!(),
     })
 }

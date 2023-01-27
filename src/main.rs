@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, env, fs};
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 
@@ -12,13 +12,14 @@ use parser::*;
 use prelude::*;
 
 fn main() {
-    let code = "FUNCTION l(p) RETURNS INTEGER\n    RETURN p\nENDFUNCTION\nTYPE b\n    DECLARE c: INTEGER\n    DECLARE g:STRING\nENDTYPE\nDECLARE d: b\nd.c <- 1\nd.g <- \"h\"\nDECLARE a:INTEGER\na <- (1+1)*2-3+4/4\nIF a = 1\n   THEN\n      OUTPUT d.c, 1\n      OUTPUT d.g\nENDIF\nOUTPUT a";
+    let code = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))
+        .expect("Failed to read file");
 
     if cfg!(debug_assertions) {
         println!("--- Code INPUT ---\n{}\n", code);
     }
 
-    let (tokens, mut errs) = lexer().parse_recovery(code);
+    let (tokens, mut errs) = lexer().parse_recovery(code.clone());
 
     let parse_errs = if let Some(tokens) = tokens {
         let eoi = 0..code.chars().count();
@@ -41,6 +42,7 @@ fn main() {
             if cfg!(debug_assertions) {
                 println!("--- Abstract Syntax Tree ---\n{:#?}\n", ast);
             }
+            println!("--- OUTPUT ---");
             match eval(&ast, &mut HashMap::new(), &mut types) {
                 Ok(_) => {}
                 Err(e) => errs.push(Simple::custom(e.span, e.msg)),

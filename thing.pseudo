@@ -1,0 +1,16 @@
+TYPE A
+    DECLARE i:INTEGER
+    DECLARE h:REAL
+ENDTYPE
+
+PROCEDURE lmao
+    OUTPUT "hi"
+ENDPROCEDURE
+
+DECLARE b:A
+
+b.i <- 1
+
+OUTPUT b.i
+CALL lmao
+OUTPUT b.i

@@ -15,8 +15,8 @@ pub enum Value {
     Str(String),
     Char(char),
     Array(Vec<Value>),
-    Func(String),
     Comp(HashMap<String, Value>),
+    Func(String),
 }
 
 impl Value {
@@ -61,16 +61,16 @@ impl Value {
         }
     }
 
-    pub fn is_func(&self) -> bool {
+    pub fn is_comp(&self) -> bool {
         match self {
-            Value::Func(_) => true,
+            Value::Comp(_) => true,
             _ => false,
         }
     }
 
-    pub fn is_comp(&self) -> bool {
+    pub fn is_func(&self) -> bool {
         match self {
-            Value::Comp(_) => true,
+            Value::Func(_) => true,
             _ => false,
         }
     }
@@ -84,22 +84,15 @@ impl Display for Value {
             Value::Int(s) => write!(f, "{:?}", s),
             Value::Real(s) => write!(f, "{:?}", s),
             Value::Bool(s) => write!(f, "{:?}", s),
-            Value::Func(s) => write!(f, "{:?}", s),
             Value::Str(s) => write!(f, "{:?}", s),
             Value::Char(s) => write!(f, "{:?}", s),
+            Value::Func(s) => write!(f, "{:?}", s),
             _ => write!(f, "display isnt available for this type"),
         }
     }
 }
 
-// A function node in the AST.
-#[derive(Debug)]
-pub struct Func {
-    args: Vec<String>,
-    body: Spanned<Expr>,
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -112,13 +105,13 @@ pub enum BinaryOp {
     Ge,
     Geq,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ArgMode {
     Byref,
     Byval,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Error,
     Value(Value),
@@ -133,11 +126,17 @@ pub enum Expr {
         Box<Spanned<Self>>,
         Box<Spanned<Self>>,
     ),
-    Func(String, Vec<(ArgMode, String)>, String, Box<Spanned<Self>>),
+    Func(
+        String,
+        Vec<((ArgMode, String), String)>,
+        String,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+    ),
     Return(Box<Spanned<Self>>),
     Then(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Binary(Box<Spanned<Self>>, BinaryOp, Box<Spanned<Self>>),
-    Call(Box<Spanned<Self>>, Vec<Spanned<Self>>),
+    Call(String, Vec<Spanned<Self>>),
     If(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     For(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     While(Box<Spanned<Self>>),
@@ -239,10 +238,6 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .then_ignore(just(Token::Ctrl('.')))
             .then(ident.map(|ident| Expr::Value(Value::Str(ident))));
 
-        let return_ = just(Token::Keyword("RETURN".to_string()))
-            .ignore_then(expr.clone())
-            .map(|body| Expr::Return(Box::new(body)));
-
         let assign = dot_resolve
             .clone()
             .or(ident.then(empty().to(Expr::Value(Value::Null))))
@@ -283,8 +278,25 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 Expr::Output(val, Box::new(body))
             });
 
+        let call_keyword = ident
+            .clone()
+            .or(just(Token::Keyword("CALL".to_string())).ignore_then(ident.clone()))
+            .labelled("call_kw");
+
+        let call = call_keyword
+            .then(items.or_not())
+            .labelled("call")
+            .map(|(f, args)| {
+                Expr::Call(
+                    f,
+                    match args {
+                        Some(args) => args,
+                        None => Vec::new(),
+                    },
+                )
+            });
+
         let atom = val
-            .or(return_)
             .or(declare_arr)
             .or(declare_comp)
             .or(declare_prim.then(expr.clone().or_not()).map_with_span(
@@ -299,6 +311,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(assign)
             .or(dot_resolve
                 .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
+            .or(call)
             .or(output)
             .or(ident
                 .then(empty().to(Expr::Value(Value::Null)))
@@ -310,34 +323,13 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 just(Token::Close(Delim::Paren)),
             ));
 
-        let call_keyword = atom
-            .clone()
-            .or(just(Token::Keyword("CALL".to_string())).ignore_then(atom.clone()))
-            .labelled("call_kw");
-
-        let call = call_keyword
-            .then(
-                items
-                    .delimited_by(
-                        just(Token::Open(Delim::Paren)),
-                        just(Token::Close(Delim::Paren)),
-                    )
-                    .map_with_span(|args, span: Span| (args, span))
-                    .repeated(),
-            )
-            .labelled("call")
-            .foldl(|f, args| {
-                let span = f.1.start..args.1.end;
-                (Expr::Call(Box::new(f), args.0), span)
-            });
-
         let op = just(Token::Op("*".to_string()))
             .to(BinaryOp::Mul)
             .or(just(Token::Op("/".to_string())).to(BinaryOp::Div))
             .labelled("binop_mult");
-        let product = call
+        let product = atom
             .clone()
-            .then(op.then(call).repeated())
+            .then(op.then(atom).repeated())
             .foldl(|a, (op, b)| {
                 let span = a.1.start..b.1.end;
                 (Expr::Binary(Box::new(a), op, Box::new(b)), span)
@@ -424,6 +416,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 None => ArgMode::Byval,
             })
             .then(ident.clone())
+            .then_ignore(just(Token::Ctrl(':')))
+            .then(type_.clone())
             .separated_by(just(Token::Ctrl(',')))
             .allow_trailing()
             .delimited_by(
@@ -434,21 +428,35 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let function = just(Token::Keyword("FUNCTION".to_string()))
             .ignore_then(ident)
-            .then(args)
+            .then(args.clone())
             .then_ignore(just(Token::Keyword("RETURNS".to_string())))
             .then(type_)
-            .then(block.clone())
+            .then(
+                expr.clone()
+                    .or(just(Token::Keyword("RETURN".to_string()))
+                        .ignore_then(expr.clone())
+                        .map_with_span(|expr, span| (Expr::Return(Box::new(expr)), span)))
+                    .delimited_by(
+                        just(Token::Open(Delim::Block)),
+                        just(Token::Close(Delim::Block)),
+                    ),
+            )
             .then_ignore(just(Token::Keyword("ENDFUNCTION".to_string())))
-            .map_with_span(|(((name, args), type_), body), span| {
-                (Expr::Func(name, args, type_, Box::new(body)), span)
+            .then(expr.clone())
+            .map_with_span(|((((name, args), type_), body), then), span| {
+                (
+                    Expr::Func(name, args, type_, Box::new(body), Box::new(then)),
+                    span,
+                )
             });
 
         let procedure = just(Token::Keyword("PROCEDURE".to_string()))
             .ignore_then(ident)
-            .then(args.or_not())
+            .then(args.clone().or_not())
             .then(block.clone())
             .then_ignore(just(Token::Keyword("ENDPROCEDURE".to_string())))
-            .map_with_span(|((name, args), body), span| {
+            .then(expr.clone())
+            .map_with_span(|(((name, args), body), then), span| {
                 (
                     Expr::Func(
                         name,
@@ -458,6 +466,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                         },
                         "NULL".to_string(),
                         Box::new(body),
+                        Box::new(then),
                     ),
                     span,
                 )
