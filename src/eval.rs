@@ -16,6 +16,7 @@ pub struct Func {
 pub enum Types {
     Composite(HashMap<String, String>),
     Enumerated(Vec<String>),
+    Array(String, isize, isize),
     Func(Func),
     Real,
     String,
@@ -28,42 +29,15 @@ pub enum Types {
 impl PartialEq for Types {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            Self::Composite(_) => match other {
-                Self::Composite(_) => true,
-                _ => false,
-            },
-            Self::Enumerated(_) => match other {
-                Self::Enumerated(_) => true,
-                _ => false,
-            },
-            Self::Func(_) => match other {
-                Self::Func(_) => true,
-                _ => false,
-            },
-            Self::Real => match other {
-                Self::Real => true,
-                _ => false,
-            },
-            Self::String => match other {
-                Self::String => true,
-                _ => false,
-            },
-            Self::Integer => match other {
-                Self::Integer => true,
-                _ => false,
-            },
-            Self::Boolean => match other {
-                Self::Boolean => true,
-                _ => false,
-            },
-            Self::Char => match other {
-                Self::Char => true,
-                _ => false,
-            },
-            Self::Null => match other {
-                Self::Null => true,
-                _ => false,
-            },
+            Self::Composite(_) => matches!(other, Self::Composite(_)),
+            Self::Enumerated(_) => matches!(other, Self::Enumerated(_)),
+            Self::Func(_) => matches!(other, Self::Func(_)),
+            Self::Real => matches!(other, Self::Real),
+            Self::String => matches!(other, Self::String),
+            Self::Integer => matches!(other, Self::Integer),
+            Self::Boolean => matches!(other, Self::Boolean),
+            Self::Char => matches!(other, Self::Char),
+            Self::Null => matches!(other, Self::Null),
             _ => false,
         }
     }
@@ -97,16 +71,18 @@ impl From<Value> for Types {
     }
 }
 
+#[derive(Debug)]
 pub struct Error {
     pub span: Span,
     pub msg: String,
 }
 
-pub fn eval<'a>(
+pub fn eval(
     expr: &Spanned<Expr>,
     vars: &mut HashMap<String, (String, Option<Value>)>,
     types: &mut HashMap<String, Types>,
 ) -> Result<Value, Error> {
+    //println!("{:?}\n\n{:?}\n", vars, types);
     Ok(match &expr.0 {
         Expr::Error => unreachable!(),
         Expr::Value(val) => val.clone(),
@@ -163,6 +139,9 @@ pub fn eval<'a>(
                         })
                     }
                 },
+                Types::Func(_) => {
+                    eval(&(Expr::Call(v.0, Vec::new()), expr.1.clone()), vars, types)?
+                }
                 _ => v.1.ok_or_else(|| Error {
                     span: expr.1.clone(),
                     msg: format!("Variable '{}' has not been initialized", name),
@@ -306,7 +285,7 @@ pub fn eval<'a>(
                                 span: expr.1.clone(),
                                 msg: format!(
                                     "Cannot assign '{:?}' must be assigned to type '{:?}'",
-                                    Types::from(rhs.clone()),
+                                    Types::from(rhs),
                                     *t
                                 ),
                             });
@@ -332,7 +311,7 @@ pub fn eval<'a>(
                     } else {
                         return Err(Error {
                             span: expr.1.clone(),
-                            msg: format!("cannot add {} to {} due to confilcting types", a, b),
+                            msg: format!("Cannot add {} to {} due to confilcting types", a, b),
                         });
                     }
                 }
@@ -342,7 +321,7 @@ pub fn eval<'a>(
                     } else {
                         return Err(Error {
                             span: expr.1.clone(),
-                            msg: format!("cannot add {} to {} due to confilcting types", a, b),
+                            msg: format!("Cannot add {} to {} due to confilcting types", a, b),
                         });
                     }
                 }
@@ -452,11 +431,17 @@ pub fn eval<'a>(
             println!();
             eval(then, vars, types)?
         }
-        Expr::If(cond, a, b) => {
+        Expr::If(cond, a, b, body) => {
             let c = eval(cond, vars, types)?;
             match c {
-                Value::Bool(true) => eval(a, vars, types)?,
-                Value::Bool(false) => eval(b, vars, types)?,
+                Value::Bool(true) => match eval(a, vars, types)? {
+                    Value::Return(t) => return Ok(Value::Return(t)),
+                    _ => return eval(body, vars, types),
+                },
+                Value::Bool(false) => match eval(b, vars, types)? {
+                    Value::Return(t) => return Ok(Value::Return(t)),
+                    _ => return eval(body, vars, types),
+                },
                 c => {
                     return Err(Error {
                         span: cond.1.clone(),
@@ -464,10 +449,6 @@ pub fn eval<'a>(
                     })
                 }
             }
-        }
-        Expr::Then(a, b) => {
-            eval(a, vars, types)?;
-            eval(b, vars, types)?
         }
         Expr::DeclareComp(name, items, body) => {
             let items = eval(items, vars, types)?;
@@ -483,6 +464,25 @@ pub fn eval<'a>(
                 let type_ = match i.1 {
                     Value::Str(s) => s,
                     _ => unreachable!(),
+                };
+
+                match types.get(&type_).ok_or_else(|| Error {
+                    span: expr.1.clone(),
+                    msg: format!("Type '{}' hasn't been declared", type_),
+                })? {
+                    Types::Composite(_) => {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: "Cannot declare Composite with Composite sub-type".to_string(),
+                        })
+                    }
+                    Types::Func(_) => {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: "Cannot declare Composite with Function sub-type".to_string(),
+                        })
+                    }
+                    _ => {}
                 };
 
                 new_h.insert(i.0, type_);
@@ -507,13 +507,19 @@ pub fn eval<'a>(
             );
             eval(then, vars, types)?
         }
+        Expr::ProcCall(expr, then) => {
+            eval(expr, vars, types)?;
+            eval(then, vars, types)?
+        }
         Expr::Call(func, args) => {
+            //gets the function definition from the type table
             let ctypes = types.clone();
             let func = ctypes.get(&func.clone()).ok_or_else(|| Error {
                 span: expr.1.clone(),
                 msg: format!("function '{}' has not been declared", func),
             })?;
 
+            //makes sure what we got back was a function
             match func {
                 Types::Func(f) => {
                     if args.len() != f.args.len() {
@@ -524,11 +530,13 @@ pub fn eval<'a>(
                     }
                     let mut vars_func = HashMap::new();
                     let mut reference = Vec::new();
+                    //type check each argument
                     for (n, i) in args.iter().enumerate() {
                         let name = match &i.0 {
                             Expr::Var(n, _) => Some(n),
                             _ => None,
                         };
+                        // checks if type exsists
                         let t_def = f.args.get(n).unwrap().clone();
                         let t_type = types.get(&t_def.1).ok_or_else(|| Error {
                             span: expr.1.clone(),
@@ -536,6 +544,7 @@ pub fn eval<'a>(
                         })?;
                         let v_type = Types::from(eval(i, vars, &mut types.clone())?);
 
+                        //checks if types dont match
                         if *t_type != v_type {
                             return Err(Error {
                                 span: expr.1.clone(),
@@ -546,24 +555,38 @@ pub fn eval<'a>(
                             });
                         }
 
+                        //store the vars on a local var map
                         vars_func
                             .insert((t_def.0).1.clone(), (t_def.1, Some(eval(i, vars, types)?)));
-                        match (t_def.0).0 {
-                            ArgMode::Byref => {
-                                if let Some(name) = name {
-                                    reference.push((name, (t_def.0).1));
-                                }
+
+                        // store whether the variable was passed byref
+                        if (t_def.0).0 == ArgMode::Byref {
+                            if let Some(name) = name {
+                                reference.push((name, (t_def.0).1));
                             }
-                            _ => {}
-                        };
+                        }
                     }
                     let output = eval(&f.body, &mut vars_func, types);
+
+                    // update the variables that where passed byref
                     for i in reference {
                         if let Some(v) = vars_func.get(&i.1) {
                             vars.insert(i.0.to_string(), v.clone());
                         }
                     }
-                    let output = output?.clone();
+
+                    let res = output?;
+                    let output = match res {
+                        Value::Return(t) => *t,
+                        Value::Null => Value::Null,
+                        v => {
+                            return Err(Error {
+                                span: expr.1.clone(),
+                                msg: format!("Value '{}' is not a return type", v),
+                            })
+                        }
+                    };
+
                     let return_type = types.get(&f.returns).unwrap();
                     if return_type.clone() == Types::from(output.clone()) {
                         output
@@ -572,7 +595,7 @@ pub fn eval<'a>(
                             span: expr.1.clone(),
                             msg: format!(
                                 "Type '{:?}' does not match return type type '{:?}'",
-                                Types::from(output.clone()),
+                                Types::from(output),
                                 return_type.clone()
                             ),
                         });
@@ -586,7 +609,34 @@ pub fn eval<'a>(
                 }
             }
         }
-        Expr::Return(v) => eval(v, vars, types)?,
+        Expr::Return(v) => Value::Return(Box::new(eval(v, vars, types)?)),
+        Expr::DeclareArr(name, start, end, type_, then) => {
+            let start = match eval(start, vars, types)? {
+                Value::Int(i) => i,
+                v => {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("Start of the array must be an integer, found '{}'", v),
+                    })
+                }
+            };
+            let end = match eval(end, vars, types)? {
+                Value::Int(i) => i,
+                v => {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("End of the array must be an integer, found '{}'", v),
+                    })
+                }
+            };
+
+            types.insert(name.clone(), Types::Array(type_.clone(), start, end));
+            vars.insert(name.clone(), (name.clone(), None));
+            let output = eval(then, vars, types);
+            types.remove(name);
+            vars.remove(name);
+            output?
+        }
         _ => {
             todo!()
         }

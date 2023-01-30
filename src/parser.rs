@@ -10,13 +10,14 @@ use crate::{
 pub enum Value {
     Null,
     Bool(bool),
-    Int(i32),
-    Real(f32),
+    Int(isize),
+    Real(f64),
     Str(String),
     Char(char),
     Array(Vec<Value>),
     Comp(HashMap<String, Value>),
     Func(String),
+    Return(Box<Self>),
 }
 
 impl Value {
@@ -117,7 +118,13 @@ pub enum Expr {
     Value(Value),
     Var(String, Box<Spanned<Self>>),
     DeclarePrim(String, String, Box<Spanned<Self>>),
-    DeclareArr(String, Box<Self>, Box<Self>, String, Box<Spanned<Self>>),
+    DeclareArr(
+        String,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        String,
+        Box<Spanned<Self>>,
+    ),
     DeclareComp(String, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Assign(Box<(String, Expr)>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Index(
@@ -126,6 +133,7 @@ pub enum Expr {
         Box<Spanned<Self>>,
         Box<Spanned<Self>>,
     ),
+
     Func(
         String,
         Vec<((ArgMode, String), String)>,
@@ -134,10 +142,15 @@ pub enum Expr {
         Box<Spanned<Self>>,
     ),
     Return(Box<Spanned<Self>>),
-    Then(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Binary(Box<Spanned<Self>>, BinaryOp, Box<Spanned<Self>>),
+    ProcCall(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Call(String, Vec<Spanned<Self>>),
-    If(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
+    If(
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+    ),
     For(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     While(Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
@@ -149,11 +162,11 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
         let val = select! {
             Token::Bool(x) => Expr::Value(Value::Bool(x)),
             Token::Num(n) => {
-                let res = n.parse::<i32>();
+                let res = n.parse::<isize>();
                 if res.is_ok() {
                     Expr::Value(Value::Int(res.unwrap()))
                 } else {
-                    let res = n.parse::<f32>();
+                    let res = n.parse::<f64>();
                     if res.is_ok() {
                         Expr::Value(Value::Real(res.unwrap()))
                     } else {
@@ -167,6 +180,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
         .labelled("value");
 
         let ident = select! {Token::Ident(item) => item.clone()}.labelled("indentifier");
+
+        let return_ = just(Token::Keyword("RETURN".to_string())).ignore_then(expr.clone());
 
         let type_ = select! { Token::Type(type_) => type_.clone() }
             .labelled("type")
@@ -225,14 +240,25 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .then_ignore(just(Token::Keyword("OF".to_string())))
             .then(type_)
             .then(expr.clone().or_not())
-            .map_with_span(|((((name, val1), val2), t), body), span| {
+            .map_with_span(|((((name, val1), val2), t), body), span: Span| {
                 let body = match body {
                     Some(t) => t,
-                    None => (Expr::Value(Value::Null), span),
+                    None => (Expr::Value(Value::Null), span.clone()),
                 };
-                Expr::DeclareArr(name.0, Box::new(val1), Box::new(val2), t, Box::new(body))
+                Expr::DeclareArr(
+                    name.0,
+                    Box::new((val1, span.clone())),
+                    Box::new((val2, span.clone())),
+                    t,
+                    Box::new(body),
+                )
             })
             .labelled("Declare_arr");
+
+        let index_resolve = ident.then(
+            expr.clone()
+                .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))),
+        );
 
         let dot_resolve = ident
             .then_ignore(just(Token::Ctrl('.')))
@@ -278,25 +304,13 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 Expr::Output(val, Box::new(body))
             });
 
-        let call_keyword = ident
-            .clone()
-            .or(just(Token::Keyword("CALL".to_string())).ignore_then(ident.clone()))
-            .labelled("call_kw");
-
-        let call = call_keyword
-            .then(items.or_not())
+        let call_function = ident
+            .then(items.clone())
             .labelled("call")
-            .map(|(f, args)| {
-                Expr::Call(
-                    f,
-                    match args {
-                        Some(args) => args,
-                        None => Vec::new(),
-                    },
-                )
-            });
+            .map(|(f, args)| Expr::Call(f, args));
 
         let atom = val
+            .or(return_.map(|a| Expr::Return(Box::new(a))))
             .or(declare_arr)
             .or(declare_comp)
             .or(declare_prim.then(expr.clone().or_not()).map_with_span(
@@ -311,8 +325,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(assign)
             .or(dot_resolve
                 .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
-            .or(call)
             .or(output)
+            .or(call_function)
             .or(ident
                 .then(empty().to(Expr::Value(Value::Null)))
                 .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
@@ -374,7 +388,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let if_ = recursive(|if_| {
             just(Token::Keyword("IF".to_string()))
-                .ignore_then(raw_expr.clone())
+                .ignore_then(expr.clone())
                 .then_ignore(just(Token::Open(Delim::Block)))
                 .then_ignore(just(Token::Keyword("THEN".to_string())))
                 .then(block.clone())
@@ -385,7 +399,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 )
                 .then_ignore(just(Token::Close(Delim::Block)))
                 .then_ignore(just(Token::Keyword("ENDIF".to_string())))
-                .map_with_span(|((cond, a), b), span: Span| {
+                .then(expr.clone().or_not())
+                .map_with_span(|(((cond, a), b), body), span: Span| {
                     (
                         Expr::If(
                             Box::new(cond),
@@ -395,10 +410,24 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                                 // If an `if` expression has no trailing `else` block, we magic up one that just produces null
                                 None => (Expr::Value(Value::Null), span.clone()),
                             }),
+                            Box::new(match body {
+                                Some(t) => t,
+                                None => (Expr::Value(Value::Null), span.clone()),
+                            }),
                         ),
                         span,
                     )
                 })
+        });
+
+        let while_ = recursive(|while_| {
+            just(Token::Keyword("WHILE".to_string()))
+                .ignore_then(raw_expr.clone().then(block.clone()).delimited_by(
+                    just(Token::Open(Delim::Block)),
+                    just(Token::Close(Delim::Block)),
+                ))
+                .then_ignore(just(Token::Keyword("ENDWHILE".to_string())))
+                .map_with_span(|(a, b), span| {})
         });
 
         let args = just(Token::Keyword("BYVAL".to_string()))
@@ -426,26 +455,52 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             )
             .labelled("function args");
 
+        let call_procedure = just(Token::Keyword("CALL".to_string()))
+            .ignore_then(ident)
+            .then(items.clone().or_not())
+            .then(expr.clone())
+            .labelled("call_procedure")
+            .map_with_span(|((f, args), body), span:Span| {
+                (
+                    Expr::ProcCall(
+                        Box::new((
+                            Expr::Call(
+                                f,
+                                match args {
+                                    Some(args) => args,
+                                    None => Vec::new(),
+                                },
+                            ),
+                            span.clone(),
+                        )),
+                        Box::new(body),
+                    ),
+                    span.clone(),
+                )
+            });
         let function = just(Token::Keyword("FUNCTION".to_string()))
             .ignore_then(ident)
-            .then(args.clone())
+            .then(args.clone().or_not())
             .then_ignore(just(Token::Keyword("RETURNS".to_string())))
             .then(type_)
-            .then(
-                expr.clone()
-                    .or(just(Token::Keyword("RETURN".to_string()))
-                        .ignore_then(expr.clone())
-                        .map_with_span(|expr, span| (Expr::Return(Box::new(expr)), span)))
-                    .delimited_by(
-                        just(Token::Open(Delim::Block)),
-                        just(Token::Close(Delim::Block)),
-                    ),
-            )
+            .then(expr.clone().delimited_by(
+                just(Token::Open(Delim::Block)),
+                just(Token::Close(Delim::Block)),
+            ))
             .then_ignore(just(Token::Keyword("ENDFUNCTION".to_string())))
             .then(expr.clone())
             .map_with_span(|((((name, args), type_), body), then), span| {
                 (
-                    Expr::Func(name, args, type_, Box::new(body), Box::new(then)),
+                    Expr::Func(
+                        name,
+                        match args {
+                            Some(t) => t,
+                            None => Vec::new(),
+                        },
+                        type_,
+                        Box::new(body),
+                        Box::new(then),
+                    ),
                     span,
                 )
             });
@@ -471,34 +526,13 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                     span,
                 )
             });
-        let block_expr = if_.or(function).or(procedure).labelled("block");
+        let block_expr = if_
+            .or(function)
+            .or(procedure)
+            .or(call_procedure)
+            .labelled("block");
 
-        let block_chain = block_expr
-            .clone()
-            .then(block_expr.clone().repeated())
-            .foldl(|a, b| {
-                let span = a.1.start..b.1.end;
-                (Expr::Then(Box::new(a), Box::new(b)), span)
-            });
-
-        let then_block = block_chain.then(expr.clone().or_not()).map(|(a, b)| {
-            // This allows creating a span that covers the entire Then expression.
-            // b_end is the end of b if it exists, otherwise it is the end of a.
-            let a_start = a.1.start;
-            let b_end = b.as_ref().map(|b| b.1.end).unwrap_or(a.1.end);
-            (
-                Expr::Then(
-                    Box::new(a),
-                    Box::new(match b {
-                        Some(b) => b,
-                        // Since there is no b expression then its span is empty.
-                        None => (Expr::Value(Value::Null), b_end..b_end),
-                    }),
-                ),
-                a_start..b_end,
-            )
-        });
-        then_block.or(raw_expr)
+        block_expr.or(raw_expr)
     })
     .then_ignore(end())
 }

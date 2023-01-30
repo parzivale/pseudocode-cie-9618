@@ -1,16 +1,18 @@
-TYPE A
-    DECLARE i:INTEGER
-    DECLARE h:REAL
-ENDTYPE
-
-PROCEDURE lmao
-    OUTPUT "hi"
+DECLARE c: INTEGER
+PROCEDURE factorial
+    DECLARE a: INTEGER
+    DECLARE b: INTEGER
+    a <- 1
+    b <- 2
+    IF a = b
+        THEN
+            OUTPUT 1
+        ELSE
+            OUTPUT 2
+    ENDIF
 ENDPROCEDURE
 
-DECLARE b:A
+c <- 1
 
-b.i <- 1
-
-OUTPUT b.i
-CALL lmao
-OUTPUT b.i
+CALL factorial
+OUTPUT c
