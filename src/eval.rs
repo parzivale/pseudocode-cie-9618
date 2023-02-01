@@ -16,7 +16,7 @@ pub struct Func {
 pub enum Types {
     Composite(HashMap<String, String>),
     Enumerated(Vec<String>),
-    Array(String, isize, isize),
+    Array(String, i32, i32),
     Func(Func),
     Real,
     String,
@@ -142,6 +142,28 @@ pub fn eval(
                 Types::Func(_) => {
                     eval(&(Expr::Call(v.0, Vec::new()), expr.1.clone()), vars, types)?
                 }
+                Types::Array(_, _, _) => match raw_value {
+                    Value::Array(v) => {
+                        let index = match eval(sub, vars, types)? {
+                            Value::Int(i) => i,
+                            t => return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot index array with value '{}'", t),
+                            })
+                        };
+
+                        v.get(index as usize).ok_or_else(|| Error{
+                            span: expr.1.clone(),
+                            msg: format!("Value at index '{}' is not defiened", index)
+                        })?.to_owned()
+                    }
+                    t => {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Expected Array got type'{}'", t),
+                        })
+                    }
+                },
                 _ => v.1.ok_or_else(|| Error {
                     span: expr.1.clone(),
                     msg: format!("Variable '{}' has not been initialized", name),
@@ -191,6 +213,15 @@ pub fn eval(
                         });
                     }
                 }
+
+                Types::Char => {
+                    if !rhs.is_char() {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Variable '{}' must be assigned to type BOOLEAN", name.0),
+                        });
+                    }
+                }
                 Types::String => {
                     if !rhs.is_str() {
                         return Err(Error {
@@ -198,6 +229,10 @@ pub fn eval(
                             msg: format!("Variable '{}' must be assigned to type STRING", name.0),
                         });
                     }
+                }
+
+                Types::Array(name, start, end) => {
+                    todo!();
                 }
 
                 Types::Composite(h) => {
@@ -636,6 +671,16 @@ pub fn eval(
             types.remove(name);
             vars.remove(name);
             output?
+        }
+        Expr::While(cond, body, then) => {
+            while eval(cond, vars, types)? == Value::Bool(true) {
+                match eval(body, vars, types)? {
+                    Value::Return(t) => return Ok(Value::Return(t)),
+                    v => v,
+                };
+            }
+
+            eval(then, vars, types)?
         }
         _ => {
             todo!()

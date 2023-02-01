@@ -10,8 +10,8 @@ use crate::{
 pub enum Value {
     Null,
     Bool(bool),
-    Int(isize),
-    Real(f64),
+    Int(i32),
+    Real(f32),
     Str(String),
     Char(char),
     Array(Vec<Value>),
@@ -51,6 +51,13 @@ impl Value {
     pub fn is_str(&self) -> bool {
         match self {
             Value::Str(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_char(&self) -> bool {
+        match self {
+            Value::Char(_) => true,
             _ => false,
         }
     }
@@ -127,12 +134,6 @@ pub enum Expr {
     ),
     DeclareComp(String, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Assign(Box<(String, Expr)>, Box<Spanned<Self>>, Box<Spanned<Self>>),
-    Index(
-        String,
-        Box<Spanned<Self>>,
-        Box<Spanned<Self>>,
-        Box<Spanned<Self>>,
-    ),
 
     Func(
         String,
@@ -152,7 +153,7 @@ pub enum Expr {
         Box<Spanned<Self>>,
     ),
     For(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
-    While(Box<Spanned<Self>>),
+    While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
     Input(String),
 }
@@ -162,11 +163,11 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
         let val = select! {
             Token::Bool(x) => Expr::Value(Value::Bool(x)),
             Token::Num(n) => {
-                let res = n.parse::<isize>();
+                let res = n.parse::<i32>();
                 if res.is_ok() {
                     Expr::Value(Value::Int(res.unwrap()))
                 } else {
-                    let res = n.parse::<f64>();
+                    let res = n.parse::<f32>();
                     if res.is_ok() {
                         Expr::Value(Value::Real(res.unwrap()))
                     } else {
@@ -257,7 +258,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let index_resolve = ident.then(
             expr.clone()
-                .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))),
+                .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
+                .map(|expr| expr.0),
         );
 
         let dot_resolve = ident
@@ -266,6 +268,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let assign = dot_resolve
             .clone()
+            .or(index_resolve.clone())
             .or(ident.then(empty().to(Expr::Value(Value::Null))))
             .then_ignore(just(Token::Op("<-".to_string())))
             .then(expr.clone())
@@ -325,6 +328,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(assign)
             .or(dot_resolve
                 .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
+            .or(index_resolve
+                .map_with_span(|(name, index), span| Expr::Var(name, Box::new((index, span)))))
             .or(output)
             .or(call_function)
             .or(ident
@@ -422,12 +427,23 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let while_ = recursive(|while_| {
             just(Token::Keyword("WHILE".to_string()))
-                .ignore_then(raw_expr.clone().then(block.clone()).delimited_by(
-                    just(Token::Open(Delim::Block)),
-                    just(Token::Close(Delim::Block)),
-                ))
+                .ignore_then(expr.clone())
+                .then(block.clone().or(while_))
                 .then_ignore(just(Token::Keyword("ENDWHILE".to_string())))
-                .map_with_span(|(a, b), span| {})
+                .then(expr.clone().or_not())
+                .map_with_span(|((cond, body), then), span: Span| {
+                    (
+                        Expr::While(
+                            Box::new(cond),
+                            Box::new(body),
+                            Box::new(match then {
+                                Some(t) => t,
+                                None => (Expr::Value(Value::Null), span.clone()),
+                            }),
+                        ),
+                        span.clone(),
+                    )
+                })
         });
 
         let args = just(Token::Keyword("BYVAL".to_string()))
@@ -458,9 +474,9 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
         let call_procedure = just(Token::Keyword("CALL".to_string()))
             .ignore_then(ident)
             .then(items.clone().or_not())
-            .then(expr.clone())
+            .then(expr.clone().or_not())
             .labelled("call_procedure")
-            .map_with_span(|((f, args), body), span:Span| {
+            .map_with_span(|((f, args), body), span: Span| {
                 (
                     Expr::ProcCall(
                         Box::new((
@@ -473,7 +489,10 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                             ),
                             span.clone(),
                         )),
-                        Box::new(body),
+                        Box::new(match body {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span.clone()),
+                        }),
                     ),
                     span.clone(),
                 )
@@ -488,8 +507,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 just(Token::Close(Delim::Block)),
             ))
             .then_ignore(just(Token::Keyword("ENDFUNCTION".to_string())))
-            .then(expr.clone())
-            .map_with_span(|((((name, args), type_), body), then), span| {
+            .then(expr.clone().or_not())
+            .map_with_span(|((((name, args), type_), body), then), span: Span| {
                 (
                     Expr::Func(
                         name,
@@ -499,7 +518,10 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                         },
                         type_,
                         Box::new(body),
-                        Box::new(then),
+                        Box::new(match then {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span.clone()),
+                        }),
                     ),
                     span,
                 )
@@ -526,10 +548,12 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                     span,
                 )
             });
+
         let block_expr = if_
             .or(function)
             .or(procedure)
             .or(call_procedure)
+            .or(while_)
             .labelled("block");
 
         block_expr.or(raw_expr)
