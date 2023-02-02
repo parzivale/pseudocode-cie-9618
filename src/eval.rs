@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
 
 use crate::{
     parser::{ArgMode, BinaryOp, Expr, Value},
@@ -65,7 +65,13 @@ impl From<Value> for Types {
             Value::Str(_) => Self::String,
             Value::Real(_) => Self::Real,
             Value::Int(_) => Self::Integer,
-            Value::Comp(_) => Self::Composite(HashMap::new()),
+            Value::Comp(h) => {
+                let mut map = HashMap::new();
+                for i in h {
+                    map.insert(i.0, i.1.to_string());
+                }
+                Self::Composite(map)
+            }
             _ => Self::Null,
         }
     }
@@ -146,16 +152,20 @@ pub fn eval(
                     Value::Array(v) => {
                         let index = match eval(sub, vars, types)? {
                             Value::Int(i) => i,
-                            t => return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot index array with value '{}'", t),
-                            })
+                            t => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Cannot index array with value '{}'", t),
+                                })
+                            }
                         };
 
-                        v.get(index as usize).ok_or_else(|| Error{
-                            span: expr.1.clone(),
-                            msg: format!("Value at index '{}' is not defiened", index)
-                        })?.to_owned()
+                        v.get(&index)
+                            .ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: format!("Value at index '{}' is not defiened", index),
+                            })?
+                            .to_owned()
                     }
                     t => {
                         return Err(Error {
@@ -218,7 +228,7 @@ pub fn eval(
                     if !rhs.is_char() {
                         return Err(Error {
                             span: expr.1.clone(),
-                            msg: format!("Variable '{}' must be assigned to type BOOLEAN", name.0),
+                            msg: format!("Variable '{}' must be assigned to type CHAR", name.0),
                         });
                     }
                 }
@@ -231,20 +241,112 @@ pub fn eval(
                     }
                 }
 
-                Types::Array(name, start, end) => {
-                    todo!();
+                Types::Array(raw_type_, start, end) => {
+                    let type_ = types.get(raw_type_).ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Type '{}' has not been defined", raw_type_),
+                    })?;
+                    let index = match &name.1 {
+                        Expr::Value(i) => match i {
+                            Value::Int(i) => {
+                                if i > end || i < start {
+                                    return Err(Error {
+                                        span: expr.1.clone(),
+                                        msg: format!(
+                                            "Index '{}' out of range",
+                                            i
+                                        ),
+                                    })
+                                }
+                                Some(i)
+                            },
+                            Value::Null => None,
+                            v => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!(
+                                        "Array datatype '{}' cannot be accessed by value {:?}",
+                                        name.0, v
+                                    ),
+                                })
+                            }
+                        }
+                        e => {
+                            return Err(Error {
+                                span: expr.1.clone(),
+                                msg: format!(
+                                    "Array datatype '{}' cannot be accessed by expression {:?}",
+                                    name.0, e
+                                ),
+                            })
+                        }
+
+                    };
+
+                    if let Some(index) = index {
+
+                        if let Some(arr) = val.clone() {
+                            match arr {
+                                Value::Array(mut v) => {
+                                    if Types::from(rhs.clone()) != *type_ {
+                                        return Err(Error {
+                                            span: expr.1.clone(),
+                                            msg: format!(
+                                                "Type '{:?}' cannot be assigned to type '{:?}'",
+                                                Types::from(rhs),
+                                                type_)
+                                        });
+                                    }
+                                    v.insert(index.clone(), rhs);
+
+                                    rhs = Value::Array(v.to_owned());
+                                }
+                                v => return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!(
+                                        "Unexpected value expected ARRAY got '{}'",
+                                        v
+                                    ),
+                                })
+                            }
+                        } else {
+                            let mut arr = HashMap::new();
+                            if Types::from(rhs.clone()) != *type_ {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!(
+                                        "Type '{:?}' cannot be assigned to type '{:?}'",
+                                        Types::from(rhs),
+                                        type_)
+                                });
+                            }
+                            arr.insert(index.clone(), rhs);
+                            rhs = Value::Array(arr.to_owned());
+                        }
+
+                    } else if !(Types::from(rhs.clone()) == Types::Array(raw_type_.clone(), start.clone(), end.clone())) {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "Cannot assign '{:?}' must be assigned to type '{:?}'",
+                                Types::from(rhs.clone()),
+                                Types::Array(raw_type_.clone(), start.clone(), end.clone())
+                            ),
+                        });
+                    }
                 }
 
                 Types::Composite(h) => {
                     let field = match &name.1 {
                         Expr::Value(s) => match s {
-                            Value::Str(s) => s,
-                            _ => {
+                            Value::Str(s) => Some(s),
+                            Value::Null => None,
+                            v => {
                                 return Err(Error {
                                     span: expr.1.clone(),
                                     msg: format!(
                                         "Composite datatype '{}' cannot be accessed by value {:?}",
-                                        name.0, name.1
+                                        name.0, v
                                     ),
                                 })
                             }
@@ -259,72 +361,85 @@ pub fn eval(
                             })
                         }
                     };
-
-                    if let Some(map) = val.clone() {
-                        match map {
-                            Value::Comp(mut local_h) => {
-                                let t = h.get(field).ok_or_else(|| Error {
-                                    span: expr.1.clone(),
-                                    msg: format!(
-                                        "Field '{}' is not defined on this composite type",
-                                        field
-                                    ),
-                                })?;
-                                let t = types.get(t).ok_or_else(|| Error {
-                                    span: expr.1.clone(),
-                                    msg: format!("type '{}' has not been defined", t),
-                                })?;
-
-                                if Types::from(rhs.clone()) == *t {
-                                    local_h.insert(field.to_owned(), rhs);
-
-                                    rhs = Value::Comp(local_h);
-                                } else {
-                                    return Err(Error {
+                    if let Some(field) = field {
+                        if let Some(map) = val.clone() {
+                            match map {
+                                Value::Comp(mut local_h) => {
+                                    let t = h.get(field).ok_or_else(|| Error {
                                         span: expr.1.clone(),
                                         msg: format!(
+                                            "Field '{}' is not defined on this composite type",
+                                            field
+                                        ),
+                                    })?;
+                                    let t = types.get(t).ok_or_else(|| Error {
+                                        span: expr.1.clone(),
+                                        msg: format!("type '{}' has not been defined", t),
+                                    })?;
+
+                                    if Types::from(rhs.clone()) == *t {
+                                        local_h.insert(field.to_owned(), rhs);
+
+                                        rhs = Value::Comp(local_h);
+                                    } else {
+                                        return Err(Error {
+                                            span: expr.1.clone(),
+                                            msg: format!(
                                             "Cannot assign '{:?}' must be assigned to type '{:?}'",
                                             Types::from(rhs.clone()),
                                             *t
                                         ),
-                                    });
+                                        });
+                                    }
+                                }
+                                v => {
+                                    return Err(Error {
+                                        span: expr.1.clone(),
+                                        msg: format!(
+                                            "Unexpected value expected COMPOSITE got '{}'",
+                                            v
+                                        ),
+                                    })
                                 }
                             }
-                            _ => {
+                        } else {
+                            let mut map = HashMap::new();
+                            let t = h.get(field).ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: format!(
+                                    "Field '{}' is not defined on this composite type",
+                                    field
+                                ),
+                            })?;
+                            let t = types.get(t).ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: format!("type '{}' has not been defined", t),
+                            })?;
+
+                            if Types::from(rhs.clone()) == *t {
+                                map.insert(field.to_owned(), rhs);
+
+                                rhs = Value::Comp(map);
+                            } else {
                                 return Err(Error {
                                     span: expr.1.clone(),
                                     msg: format!(
-                                        "Variable '{}' must be assigned to type STRING",
-                                        name.0
+                                        "Cannot assign '{:?}' must be assigned to type '{:?}'",
+                                        Types::from(rhs),
+                                        *t
                                     ),
-                                })
+                                });
                             }
                         }
-                    } else {
-                        let mut map = HashMap::new();
-                        let t = h.get(field).ok_or_else(|| Error {
+                    } else if !(Types::from(rhs.clone()) == Types::Composite(h.clone())) {
+                        return Err(Error {
                             span: expr.1.clone(),
-                            msg: format!("Field '{}' is not defined on this composite type", field),
-                        })?;
-                        let t = types.get(t).ok_or_else(|| Error {
-                            span: expr.1.clone(),
-                            msg: format!("type '{}' has not been defined", t),
-                        })?;
-
-                        if Types::from(rhs.clone()) == *t {
-                            map.insert(field.to_owned(), rhs);
-
-                            rhs = Value::Comp(map);
-                        } else {
-                            return Err(Error {
-                                span: expr.1.clone(),
-                                msg: format!(
-                                    "Cannot assign '{:?}' must be assigned to type '{:?}'",
-                                    Types::from(rhs),
-                                    *t
-                                ),
-                            });
-                        }
+                            msg: format!(
+                                "Cannot assign '{:?}' must be assigned to type '{:?}'",
+                                Types::from(rhs.clone()),
+                                Types::Composite(h.clone())
+                            ),
+                        });
                     }
                 }
                 _ => {
@@ -438,7 +553,7 @@ pub fn eval(
             match a {
                 Value::Int(a) => {
                     if let Value::Int(b) = b {
-                        Value::Int(a / b)
+                        Value::Real(a as f32 / b as f32)
                     } else {
                         return Err(Error {
                             span: expr.1.clone(),

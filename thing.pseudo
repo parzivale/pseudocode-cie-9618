@@ -1,24 +1,5 @@
-TYPE a
-    DECLARE i:REAL
-ENDTYPE
+DECLARE a:ARRAY[1:10] OF INTEGER
 
-FUNCTION factorial(a:REAL) RETURNS REAL
-    IF a = 0.0
-        THEN
-            RETURN 1.0
-    ENDIF
-    RETURN a*factorial(a-1.0)
-ENDFUNCTION
+a[4] <- 1
 
-DECLARE b:a
-b.i <- 5.0
-
-OUTPUT factorial(b.i)
-
-DECLARE a:INTEGER
-a <- 10
-
-WHILE a <> 0
-    OUTPUT a
-    a <- a-1
-ENDWHILE
+OUTPUT a[4]

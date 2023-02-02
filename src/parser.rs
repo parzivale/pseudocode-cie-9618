@@ -14,7 +14,7 @@ pub enum Value {
     Real(f32),
     Str(String),
     Char(char),
-    Array(Vec<Value>),
+    Array(HashMap<i32, Value>),
     Comp(HashMap<String, Value>),
     Func(String),
     Return(Box<Self>),
