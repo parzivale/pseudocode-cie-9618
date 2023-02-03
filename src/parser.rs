@@ -326,10 +326,10 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 },
             ))
             .or(assign)
-            .or(dot_resolve
-                .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
             .or(index_resolve
                 .map_with_span(|(name, index), span| Expr::Var(name, Box::new((index, span)))))
+            .or(dot_resolve
+                .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
             .or(output)
             .or(call_function)
             .or(ident

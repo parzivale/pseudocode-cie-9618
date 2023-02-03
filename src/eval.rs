@@ -252,14 +252,11 @@ pub fn eval(
                                 if i > end || i < start {
                                     return Err(Error {
                                         span: expr.1.clone(),
-                                        msg: format!(
-                                            "Index '{}' out of range",
-                                            i
-                                        ),
-                                    })
+                                        msg: format!("Index '{}' out of range", i),
+                                    });
                                 }
                                 Some(i)
-                            },
+                            }
                             Value::Null => None,
                             v => {
                                 return Err(Error {
@@ -270,7 +267,7 @@ pub fn eval(
                                     ),
                                 })
                             }
-                        }
+                        },
                         e => {
                             return Err(Error {
                                 span: expr.1.clone(),
@@ -280,11 +277,9 @@ pub fn eval(
                                 ),
                             })
                         }
-
                     };
 
                     if let Some(index) = index {
-
                         if let Some(arr) = val.clone() {
                             match arr {
                                 Value::Array(mut v) => {
@@ -294,20 +289,20 @@ pub fn eval(
                                             msg: format!(
                                                 "Type '{:?}' cannot be assigned to type '{:?}'",
                                                 Types::from(rhs),
-                                                type_)
+                                                type_
+                                            ),
                                         });
                                     }
                                     v.insert(index.clone(), rhs);
 
                                     rhs = Value::Array(v.to_owned());
                                 }
-                                v => return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!(
-                                        "Unexpected value expected ARRAY got '{}'",
-                                        v
-                                    ),
-                                })
+                                v => {
+                                    return Err(Error {
+                                        span: expr.1.clone(),
+                                        msg: format!("Unexpected value expected ARRAY got '{}'", v),
+                                    })
+                                }
                             }
                         } else {
                             let mut arr = HashMap::new();
@@ -317,14 +312,16 @@ pub fn eval(
                                     msg: format!(
                                         "Type '{:?}' cannot be assigned to type '{:?}'",
                                         Types::from(rhs),
-                                        type_)
+                                        type_
+                                    ),
                                 });
                             }
                             arr.insert(index.clone(), rhs);
                             rhs = Value::Array(arr.to_owned());
                         }
-
-                    } else if !(Types::from(rhs.clone()) == Types::Array(raw_type_.clone(), start.clone(), end.clone())) {
+                    } else if !(Types::from(rhs.clone())
+                        == Types::Array(raw_type_.clone(), start.clone(), end.clone()))
+                    {
                         return Err(Error {
                             span: expr.1.clone(),
                             msg: format!(
@@ -568,6 +565,118 @@ pub fn eval(
                         return Err(Error {
                             span: expr.1.clone(),
                             msg: format!("cannot divide {} by {} due to confilcting types", b, a),
+                        });
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Expr::Binary(a, BinaryOp::Ge, b) => {
+            let a = eval(a, vars, types)?;
+            let b = eval(b, vars, types)?;
+
+            match a {
+                Value::Int(a) => {
+                    if let Value::Int(b) = b {
+                        Value::Bool(a > b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                Value::Real(a) => {
+                    if let Value::Real(b) = b {
+                        Value::Bool(a > b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Expr::Binary(a, BinaryOp::Geq, b) => {
+            let a = eval(a, vars, types)?;
+            let b = eval(b, vars, types)?;
+
+            match a {
+                Value::Int(a) => {
+                    if let Value::Int(b) = b {
+                        Value::Bool(a >= b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                Value::Real(a) => {
+                    if let Value::Real(b) = b {
+                        Value::Bool(a >= b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Expr::Binary(a, BinaryOp::Le, b) => {
+            let a = eval(a, vars, types)?;
+            let b = eval(b, vars, types)?;
+
+            match a {
+                Value::Int(a) => {
+                    if let Value::Int(b) = b {
+                        Value::Bool(a < b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                Value::Real(a) => {
+                    if let Value::Real(b) = b {
+                        Value::Bool(a < b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Expr::Binary(a, BinaryOp::Leq, b) => {
+            let a = eval(a, vars, types)?;
+            let b = eval(b, vars, types)?;
+
+            match a {
+                Value::Int(a) => {
+                    if let Value::Int(b) = b {
+                        Value::Bool(a <= b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                Value::Real(a) => {
+                    if let Value::Real(b) = b {
+                        Value::Bool(a <= b)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot compare '{}' to '{}'", b, a),
                         });
                     }
                 }

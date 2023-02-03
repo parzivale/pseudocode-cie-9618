@@ -1,5 +1,6 @@
-DECLARE a:ARRAY[1:10] OF INTEGER
+DECLARE a:ARRAY[1:10] OF STRING
 
-a[4] <- 1
+a[1] <- "a"
 
-OUTPUT a[4]
+OUTPUT a[1]
+OUTPUT a["1"]
