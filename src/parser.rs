@@ -513,7 +513,6 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                         .clone()
                         .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))))
                     .repeated(),
-
             )
             .then_ignore(just(Token::Op("<-".to_string())))
             .then(expr.clone())

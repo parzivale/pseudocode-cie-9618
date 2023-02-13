@@ -192,6 +192,7 @@ pub fn eval(
             }
         }
         Expr::DeclarePrim(name, type_, then) => {
+            // all primitive variables in pseudocode are initialized to a none type
             vars.insert(name.clone(), (type_.clone(), None));
             let output = eval(then, vars, types);
             output?
@@ -209,6 +210,7 @@ pub fn eval(
                 }
             };
 
+            // type of the lhs as string
             let (type_str_, _) = vars.get(&name).ok_or_else(|| Error {
                 span: expr.1.clone(),
                 msg: format!("'{}' Has not been declared", name),
@@ -219,9 +221,96 @@ pub fn eval(
                 msg: format!("'{}' Has not been defined", type_str_),
             })?;
 
+            // different actions for different types
             match type_ {
-                Types::Composite(h) => todo!(),
-                // if the value isnt a user defined type, just assign it directly
+                Types::Composite(h) => {
+                    //temporay type map to find the final type
+                    let mut temp_types = h.clone();
+                    let mut final_type = Types::Null;
+
+                    for i in children {
+                        let i = eval(i, vars, &mut temp_types)?;
+
+                        //composite types can only be accessed by ints or strings
+                        match i {
+                            Value::Str(s) => {
+                                let child_type = temp_types.get(&s).ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!(
+                                        "Child '{}' does not exsist on composite type '{:?}'",
+                                        s, temp_types
+                                    ),
+                                })?;
+
+                                // arrays must have globally defined types, this is a limitation of pseudocode
+                                // as we only care about the type of the children we immediatly destructure the
+                                // array datatype
+                                let child_type = match child_type {
+                                    Types::Array(s, _, _) => types.get(s).ok_or_else(|| Error {
+                                        span: expr.1.clone(),
+                                        msg: format!(
+                                            "Child '{}' does not exsist on composite type '{:?}'",
+                                            s, temp_types
+                                        ),
+                                    })?,
+                                    t => t,
+                                };
+                                final_type = child_type.clone();
+                            }
+                            //we dont need to handle array indexing here, we only care about the type
+                            Value::Int(i) => {}
+                            v => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Cannot access with composite type '{}'", v),
+                                })
+                            }
+                        };
+                    }
+
+                    //composites cant have children of type null
+                    if final_type == Types::Null {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("'{}' seems to have a NULL type, which is impossible", name),
+                        })
+                    }
+
+                    // check if the rhs has the same type as the final type
+                    if Types::from(rhs.clone()) != final_type {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot assign '{:?}' to '{:?}'", Types::from(rhs.clone()), final_type),
+                        })
+                    }
+
+
+                    // here the final type of the variable should have been found
+                    // we now need to assign the vairable on the var map to the rhs
+                    for i in children {
+                        let i = eval(i, vars, types)?;
+                        let mut var ;
+                        match i {
+                            Value::Str(s) => {
+                                var = vars.get_mut(&s);
+
+                            }
+                            Value::Int(i) => {
+                            }
+                            v => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Cannot access with composite type '{}'", v),
+                                })
+                            }
+                        };
+                    }
+
+
+                    // end of composite type actions
+                }
+
+                // if the variable isnt a user defined type, just assign it directly
                 t => {
                     if *t == Types::from(rhs.clone()) {
                         vars.insert(name, (type_str_.to_string(), Some(rhs)));
@@ -238,8 +327,7 @@ pub fn eval(
                 }
             };
 
-            eval(then, vars, types)?;
-            Value::Null
+            eval(then, vars, types)?
         }
         Expr::Binary(a, BinaryOp::Add, b) => {
             let a = eval(a, vars, types)?;
