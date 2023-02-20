@@ -14,8 +14,7 @@ pub enum Value {
     Real(f32),
     Str(String),
     Char(char),
-    Array(HashMap<i32, Value>),
-    Comp(HashMap<String, Value>),
+    Comp(HashMap<String, (String, Option<Value>)>),
     Func(String),
     Return(Box<Self>),
 }
@@ -61,14 +60,6 @@ impl Value {
             _ => false,
         }
     }
-
-    pub fn is_arr(&self) -> bool {
-        match self {
-            Value::Array(_) => true,
-            _ => false,
-        }
-    }
-
     pub fn is_comp(&self) -> bool {
         match self {
             Value::Comp(_) => true,
@@ -87,7 +78,6 @@ impl Value {
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Array(s) => write!(f, "{:?}", s),
             Value::Null => write!(f, "Null"),
             Value::Int(s) => write!(f, "{:?}", s),
             Value::Real(s) => write!(f, "{:?}", s),
@@ -122,8 +112,10 @@ pub enum ArgMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Error,
+    Name(Box<Spanned<Self>>),
     Value(Value),
-    Var(Box<Spanned<Self>>, Box<Spanned<Self>>),
+    CompVar(Box<Spanned<Self>>, Box<Spanned<Self>>),
+    Var(Box<Spanned<Self>>),
     DeclarePrim(String, String, Box<Spanned<Self>>),
     DeclareArr(
         String,
@@ -209,14 +201,9 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
         let atom = val
             .or(return_.map(|a| Expr::Return(Box::new(a))))
             .or(call_function)
-            .or(ident
-                .then(empty().to(Expr::Value(Value::Null)))
-                .map_with_span(|(ident, val), span: Span| {
-                    Expr::Var(
-                        Box::new((Expr::Value(Value::Str(ident)), span.clone())),
-                        Box::new((val, span)),
-                    )
-                }))
+            .or(ident.map_with_span(|ident, span: Span| {
+                Expr::Var(Box::new((Expr::Value(Value::Str(ident)), span.clone())))
+            }))
             .labelled("atom")
             .map_with_span(|expr, span| (expr, span))
             .or(expr.clone().delimited_by(
@@ -227,10 +214,12 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
         let op = just(Token::Ctrl('.')).labelled("Comp_access");
         let comp = atom
             .clone()
-            .then(op.ignore_then(atom.clone()).repeated())
-            .foldl(|a, b| {
+            .then_ignore(op)
+            .repeated()
+            .then(atom.clone())
+            .foldr(|a, b| {
                 let span = a.1.start..b.1.end;
-                (Expr::Var(Box::new(a), Box::new(b)), span)
+                (Expr::CompVar(Box::new(a), Box::new(b)), span)
             });
 
         let op = just(Token::Op("*".to_string()))
@@ -266,7 +255,10 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             )
             .foldl(|a, b| {
                 let span = a.1.start..b.1.end;
-                (Expr::Var(Box::new(a), Box::new(b)), span)
+                (
+                    Expr::CompVar(Box::new(a), Box::new((Expr::Var(Box::new(b.clone())), b.1))),
+                    span,
+                )
             });
 
         let op = just(Token::Op("=".to_string()))
@@ -536,11 +528,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .labelled("assign");
 
         let output = just(Token::Keyword("OUTPUT".to_string()))
-            .ignore_then(
-                expr.clone()
-                    .separated_by(just(Token::Ctrl(',')))
-                    .allow_trailing(),
-            )
+            .ignore_then(expr.clone().separated_by(just(Token::Ctrl(','))))
             .then(expr.clone().or_not())
             .map_with_span(|(val, body), span: Span| {
                 let body = match body {

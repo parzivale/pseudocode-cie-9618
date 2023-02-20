@@ -1,15 +1,13 @@
-TYPE a
-    DECLARE i:INTEGER
-ENDTYPE
-
-TYPE b
-    DECLARE m:a
+TYPE m
+    DECLARE j:INTEGER
+    DECLARE i:ARRAY[1:10] OF STRING
 ENDTYPE
 
 
-OUTPUT ((3*5)-(1*(4+2)))
-DECLARE a:b
-DECLARE b:INTEGER
-b <- 1
+DECLARE m:m
+m.j <- 1
+m.i[1] <- "a"
 
-OUTPUT b
+
+OUTPUT m.j
+OUTPUT m.i[1]
