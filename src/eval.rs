@@ -205,6 +205,7 @@ fn comp_fill(
                                     for i in *s..*e {
                                         temp.insert(i.to_string(), (t.clone(), None::<Value>));
                                     }
+                                    temp.insert(last.clone(), (t.clone(), Some(rhs.clone())));
                                 }
                             };
                         }
@@ -212,6 +213,7 @@ fn comp_fill(
                             for i in *s..*e {
                                 temp.insert(i.to_string(), (t.clone(), None::<Value>));
                             }
+                            temp.insert(last.clone(), (t.clone(), Some(rhs.clone())));
                         }
                     }
                     temp_types.insert(i.0.clone(), (i.1.clone(), Some(Value::Comp(temp))));
@@ -240,6 +242,7 @@ pub struct Error {
 pub fn eval(
     expr: &Spanned<Expr>,
     vars: &mut HashMap<String, (String, Option<Value>)>,
+    local_vars: &mut HashMap<String, (String, Option<Value>)>,
     types: &mut HashMap<String, Types>,
 ) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", vars, types);
@@ -247,7 +250,7 @@ pub fn eval(
         Expr::Error => unreachable!(),
         Expr::Value(val) => val.clone(),
         Expr::Var(name) => {
-            let name = match eval(name, vars, types)? {
+            let name = match eval(name, vars, local_vars, types)? {
                 Value::Str(s) => s,
                 Value::Int(i) => i.to_string(),
                 n => {
@@ -259,19 +262,23 @@ pub fn eval(
             };
             //println!("vars:{:?}\nname:{:?}\ntypes:{:?}", vars, name, types);
 
-            let v = vars
+            let v = local_vars
                 .get(&name)
                 .ok_or_else(|| Error {
                     span: expr.1.clone(),
                     msg: format!("No such variable '{:?}' in scope (string error)", name),
-                })?
-                .to_owned();
+                }).or_else(|err| {
+                    vars.get(&name).ok_or(err)
+                })?.to_owned();
 
             if let Some(type_) = types.get(&v.0) {
                 match type_ {
-                    Types::Func(_) => {
-                        eval(&(Expr::Call(v.0, Vec::new()), expr.1.clone()), vars, types)?
-                    }
+                    Types::Func(_) => eval(
+                        &(Expr::Call(v.0, Vec::new()), expr.1.clone()),
+                        vars,
+                        local_vars,
+                        types,
+                    )?,
                     _ => v.1.ok_or_else(|| Error {
                         span: expr.1.clone(),
                         msg: format!("Variable '{}' has not been initialized", name),
@@ -286,23 +293,26 @@ pub fn eval(
         }
 
         Expr::CompVar(name, sub) => {
-            match eval(name, vars, types)? {
+            match eval(name, vars, local_vars, types)? {
                 Value::Comp(h) => {
                     //println!("{:?}\n{:?}", h, sub);
-                    eval(sub, &mut h.clone(), types)?
+                    eval(sub, vars, &mut h.clone(), types)?
                 }
-                _ => panic!(),
+                v => {
+                    println!("{:?}", v);
+                    panic!()
+                }
             }
         }
         Expr::DeclarePrim(name, type_, then) => {
             // all primitive variables in pseudocode are initialized to a none type
             vars.insert(name.clone(), (type_.clone(), None));
-            let output = eval(then, vars, types);
+            let output = eval(then, vars, local_vars, types);
             output?
         }
         Expr::Assign(name, children, rhs, then) => {
-            let rhs = eval(rhs, vars, types)?;
-            let name = match eval(name, vars, types)? {
+            let rhs = eval(rhs, vars, local_vars, types)?;
+            let name = match eval(name, vars, local_vars, types)? {
                 Value::Str(s) => s,
                 v => {
                     return Err(Error {
@@ -337,7 +347,12 @@ pub fn eval(
                     let mut final_type = type_;
 
                     for i in children {
-                        let i = eval(i, vars, &mut to_type_map(temp_types.clone(), types, expr)?)?;
+                        let i = eval(
+                            i,
+                            vars,
+                            local_vars,
+                            &mut to_type_map(temp_types.clone(), types, expr)?,
+                        )?;
 
                         //composite types can only be accessed by ints or strings
                         match i {
@@ -408,7 +423,7 @@ pub fn eval(
                     let mut maps = Vec::new();
                     if let Some(mut current_var) = current_var.1.clone() {
                         for i in children {
-                            let i = eval(i, vars, types)?;
+                            let i = eval(i, vars, local_vars, types)?;
                             match i {
                                 Value::Str(s) => match current_var.clone() {
                                     Value::Comp(h) => {
@@ -452,6 +467,7 @@ pub fn eval(
                             let index = eval(
                                 index,
                                 vars,
+                                local_vars,
                                 &mut to_type_map(temp_types.clone(), types, expr)?,
                             )?;
                             match index {
@@ -490,11 +506,12 @@ pub fn eval(
                         if let Value::Comp(h) = rhs {
                             vars.insert(name.clone(), (type_str_, Some(Value::Comp(h))));
                         } else {
-                            let last = match eval(children.last().unwrap(), vars, types)? {
-                                Value::Str(s) => s,
-                                Value::Int(i) => i.to_string(),
-                                _ => panic!(),
-                            };
+                            let last =
+                                match eval(children.last().unwrap(), vars, local_vars, types)? {
+                                    Value::Str(s) => s,
+                                    Value::Int(i) => i.to_string(),
+                                    _ => panic!(),
+                                };
                             vars.insert(
                                 name.clone(),
                                 (
@@ -522,10 +539,12 @@ pub fn eval(
                         panic!()
                     }
 
-                    if let Some(current_var) = vars.get(&name) {
+                    let current_var = vars.get(&name).unwrap();
+                    if let Some(mut current_var) = current_var.1.clone() {
                     } else {
-                        let last = match eval(children.last().unwrap(), vars, types)? {
+                        let last = match eval(children.last().unwrap(), vars, local_vars, types)? {
                             Value::Str(s) => s,
+                            Value::Int(i) => i.to_string(),
                             _ => panic!(),
                         };
                         match t {
@@ -563,11 +582,11 @@ pub fn eval(
                 }
             };
 
-            eval(then, vars, types)?
+            eval(then, vars, local_vars, types)?
         }
         Expr::Binary(a, BinaryOp::Add, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -594,14 +613,14 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Eq, b) => {
-            Value::Bool(eval(a, vars, types)? == eval(b, vars, types)?)
+            Value::Bool(eval(a, vars, local_vars, types)? == eval(b, vars, local_vars, types)?)
         }
         Expr::Binary(a, BinaryOp::NotEq, b) => {
-            Value::Bool(eval(a, vars, types)? != eval(b, vars, types)?)
+            Value::Bool(eval(a, vars, local_vars, types)? != eval(b, vars, local_vars, types)?)
         }
         Expr::Binary(a, BinaryOp::Mul, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -628,8 +647,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Sub, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -662,8 +681,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Div, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -690,8 +709,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Ge, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -718,8 +737,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Geq, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -746,8 +765,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Le, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -774,8 +793,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Leq, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -802,23 +821,22 @@ pub fn eval(
             }
         }
         Expr::Output(val, then) => {
-            println!("{:?}", val);
             for i in val {
-                print!("{}", eval(i, vars, types)?);
+                print!("{}", eval(i, vars, local_vars, types)?);
             }
             println!();
-            eval(then, vars, types)?
+            eval(then, vars, local_vars, types)?
         }
         Expr::If(cond, a, b, body) => {
-            let c = eval(cond, vars, types)?;
+            let c = eval(cond, vars, local_vars, types)?;
             match c {
-                Value::Bool(true) => match eval(a, vars, types)? {
+                Value::Bool(true) => match eval(a, vars, local_vars, types)? {
                     Value::Return(t) => return Ok(Value::Return(t)),
-                    _ => return eval(body, vars, types),
+                    _ => return eval(body, vars, local_vars, types),
                 },
-                Value::Bool(false) => match eval(b, vars, types)? {
+                Value::Bool(false) => match eval(b, vars, local_vars, types)? {
                     Value::Return(t) => return Ok(Value::Return(t)),
-                    _ => return eval(body, vars, types),
+                    _ => return eval(body, vars, local_vars, types),
                 },
                 c => {
                     return Err(Error {
@@ -830,13 +848,13 @@ pub fn eval(
         }
         Expr::DeclareComp(name, items, body) => {
             let mut new_v = HashMap::new();
-            eval(items, &mut new_v, types)?;
+            eval(items, &mut new_v, local_vars, types)?;
             let mut map = HashMap::new();
             for i in new_v {
                 map.insert(i.0, (i.1).0);
             }
             types.insert(name.clone(), Types::Composite(map));
-            let output = eval(body, vars, types);
+            let output = eval(body, vars, local_vars, types);
             output?
         }
         Expr::Func(name, args, type_, body, then) => {
@@ -852,11 +870,11 @@ pub fn eval(
                 name.to_string(),
                 (name.to_string(), Some(Value::Func(name.to_string()))),
             );
-            eval(then, vars, types)?
+            eval(then, vars, local_vars, types)?
         }
         Expr::ProcCall(expr, then) => {
-            eval(expr, vars, types)?;
-            eval(then, vars, types)?
+            eval(expr, vars, local_vars, types)?;
+            eval(then, vars, local_vars, types)?
         }
         Expr::Call(func, args) => {
             //gets the function definition from the type table
@@ -889,7 +907,7 @@ pub fn eval(
                             span: expr.1.clone(),
                             msg: format!("Type '{}' is not declared", t_def.1),
                         })?;
-                        let v_type = Types::from(eval(i, vars, &mut types.clone())?);
+                        let v_type = Types::from(eval(i, vars, local_vars, &mut types.clone())?);
 
                         //checks if types dont match
                         if *t_type != v_type {
@@ -903,8 +921,10 @@ pub fn eval(
                         }
 
                         //store the vars on a local var map
-                        vars_func
-                            .insert((t_def.0).1.clone(), (t_def.1, Some(eval(i, vars, types)?)));
+                        vars_func.insert(
+                            (t_def.0).1.clone(),
+                            (t_def.1, Some(eval(i, vars, local_vars, types)?)),
+                        );
 
                         // store whether the variable was passed byref
                         if (t_def.0).0 == ArgMode::Byref {
@@ -913,12 +933,12 @@ pub fn eval(
                             }
                         }
                     }
-                    let output = eval(&f.body, &mut vars_func, types);
+                    let output = eval(&f.body, &mut vars_func, local_vars, types);
 
                     // update the variables that where passed byref
 
                     for i in reference {
-                        let name = match eval(i.0, vars, types)? {
+                        let name = match eval(i.0, vars, local_vars, types)? {
                             Value::Str(s) => s,
                             n => {
                                 return Err(Error {
@@ -967,9 +987,9 @@ pub fn eval(
                 }
             }
         }
-        Expr::Return(v) => Value::Return(Box::new(eval(v, vars, types)?)),
+        Expr::Return(v) => Value::Return(Box::new(eval(v, vars, local_vars, types)?)),
         Expr::DeclareArr(name, start, end, type_, then) => {
-            let start = match eval(start, vars, types)? {
+            let start = match eval(start, vars, local_vars, types)? {
                 Value::Int(i) => i,
                 v => {
                     return Err(Error {
@@ -978,7 +998,7 @@ pub fn eval(
                     })
                 }
             };
-            let end = match eval(end, vars, types)? {
+            let end = match eval(end, vars, local_vars, types)? {
                 Value::Int(i) => i,
                 v => {
                     return Err(Error {
@@ -990,20 +1010,20 @@ pub fn eval(
 
             types.insert(name.clone(), Types::Array(type_.clone(), start, end));
             vars.insert(name.clone(), (name.clone(), None));
-            let output = eval(then, vars, types);
+            let output = eval(then, vars, local_vars, types);
             //types.remove(name);
             //vars.remove(name);
             output?
         }
         Expr::While(cond, body, then) => {
-            while eval(cond, vars, types)? == Value::Bool(true) {
-                match eval(body, vars, types)? {
+            while eval(cond, vars, local_vars, types)? == Value::Bool(true) {
+                match eval(body, vars, local_vars, types)? {
                     Value::Return(t) => return Ok(Value::Return(t)),
                     v => v,
                 };
             }
 
-            eval(then, vars, types)?
+            eval(then, vars, local_vars, types)?
         }
         _ => {
             todo!()

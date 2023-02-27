@@ -1,0 +1,16 @@
+DECLARE string:STRING
+
+string <- "hi there im a string!"
+
+DECLARE string2:STRING
+
+string2 <- "hi there im string 2!"
+
+IF string = string2
+    THEN
+        OUTPUT "yes"
+    ELSE
+        OUTPUT "no"
+ENDIF
+
+OUTPUT string

@@ -1,0 +1,16 @@
+DECLARE char:CHAR
+
+char <- 'h'
+
+DECLARE char2:CHAR
+
+char2 <- 'l'
+
+IF char = char2
+    THEN
+        OUTPUT "yes"
+    ELSE
+        OUTPUT "no"
+ENDIF
+
+OUTPUT char

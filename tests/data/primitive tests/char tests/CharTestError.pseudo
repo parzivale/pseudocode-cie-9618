@@ -1,0 +1,3 @@
+DECLARE char:CHAR
+
+char <- 1

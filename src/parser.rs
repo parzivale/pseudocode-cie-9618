@@ -210,25 +210,13 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 just(Token::Open(Delim::Paren)),
                 just(Token::Close(Delim::Paren)),
             ));
-
-        let op = just(Token::Ctrl('.')).labelled("Comp_access");
-        let comp = atom
-            .clone()
-            .then_ignore(op)
-            .repeated()
-            .then(atom.clone())
-            .foldr(|a, b| {
-                let span = a.1.start..b.1.end;
-                (Expr::CompVar(Box::new(a), Box::new(b)), span)
-            });
-
         let op = just(Token::Op("*".to_string()))
             .to(BinaryOp::Mul)
             .or(just(Token::Op("/".to_string())).to(BinaryOp::Div))
             .labelled("binop_mult");
-        let product = comp
+        let product = atom
             .clone()
-            .then(op.then(comp).repeated())
+            .then(op.then(atom.clone()).repeated())
             .foldl(|a, (op, b)| {
                 let span = a.1.start..b.1.end;
                 (Expr::Binary(Box::new(a), op, Box::new(b)), span)
@@ -246,17 +234,33 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 (Expr::Binary(Box::new(a), op, Box::new(b)), span)
             });
 
+        let op = just(Token::Ctrl('.')).labelled("Comp_access");
         let index = sum
             .clone()
             .then(
-                sum.clone()
-                    .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
+                op.ignore_then(atom.clone())
+                    .or(sum
+                        .clone()
+                        .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))))
                     .repeated(),
             )
             .foldl(|a, b| {
                 let span = a.1.start..b.1.end;
+
                 (
-                    Expr::CompVar(Box::new(a), Box::new((Expr::Var(Box::new(b.clone())), b.1))),
+                    Expr::CompVar(
+                        Box::new(a),
+                        Box::new(match b.0.clone() {
+                            Expr::Value(t) => {
+                                (Expr::Var(Box::new((Expr::Value(t), b.1.clone()))), b.1)
+                            }
+                            Expr::Binary(lhs, op, rhs) => (
+                                Expr::Var(Box::new((Expr::Binary(lhs, op, rhs), b.1.clone()))),
+                                b.1,
+                            ),
+                            _ => b,
+                        }),
+                    ),
                     span,
                 )
             });
