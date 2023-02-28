@@ -1,6 +1,0 @@
-DECLARE a:ARRAY[1:10] OF STRING
-
-a[1] <- "a"
-
-OUTPUT a[1]
-OUTPUT a["1"]

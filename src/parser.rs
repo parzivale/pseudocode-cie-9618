@@ -14,8 +14,7 @@ pub enum Value {
     Real(f32),
     Str(String),
     Char(char),
-    Array(HashMap<i32, Value>),
-    Comp(HashMap<String, Value>),
+    Comp(HashMap<String, (String, Option<Value>)>),
     Func(String),
     Return(Box<Self>),
 }
@@ -61,14 +60,6 @@ impl Value {
             _ => false,
         }
     }
-
-    pub fn is_arr(&self) -> bool {
-        match self {
-            Value::Array(_) => true,
-            _ => false,
-        }
-    }
-
     pub fn is_comp(&self) -> bool {
         match self {
             Value::Comp(_) => true,
@@ -87,7 +78,6 @@ impl Value {
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Array(s) => write!(f, "{:?}", s),
             Value::Null => write!(f, "Null"),
             Value::Int(s) => write!(f, "{:?}", s),
             Value::Real(s) => write!(f, "{:?}", s),
@@ -122,8 +112,10 @@ pub enum ArgMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Error,
+    Name(Box<Spanned<Self>>),
     Value(Value),
-    Var(String, Box<Spanned<Self>>),
+    CompVar(Box<Spanned<Self>>, Box<Spanned<Self>>),
+    Var(Box<Spanned<Self>>),
     DeclarePrim(String, String, Box<Spanned<Self>>),
     DeclareArr(
         String,
@@ -133,8 +125,12 @@ pub enum Expr {
         Box<Spanned<Self>>,
     ),
     DeclareComp(String, Box<Spanned<Self>>, Box<Spanned<Self>>),
-    Assign(Box<(String, Expr)>, Box<Spanned<Self>>, Box<Spanned<Self>>),
-
+    Assign(
+        Box<Spanned<Self>>,
+        Vec<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+    ),
     Func(
         String,
         Vec<((ArgMode, String), String)>,
@@ -188,101 +184,6 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .labelled("type")
             .or(ident);
 
-        let declare_prim = just(Token::Keyword("DECLARE".to_string()))
-            .ignore_then(ident)
-            .then_ignore(just(Token::Ctrl(':')))
-            .then(type_)
-            .labelled("Declare_prim");
-
-        let declare_comp = just(Token::Keyword("TYPE".to_string()))
-            .ignore_then(ident.clone())
-            .then(
-                declare_prim
-                    .clone()
-                    .repeated()
-                    .delimited_by(
-                        just(Token::Open(Delim::Block)),
-                        just(Token::Close(Delim::Block)),
-                    )
-                    .collect::<Vec<_>>()
-                    .map_with_span(|map, span| {
-                        let mut new_h = HashMap::new();
-
-                        for i in map.iter() {
-                            new_h.insert(i.0.to_string(), Value::Str(i.1.to_owned()));
-                        }
-
-                        (Expr::Value(Value::Comp(new_h)), span)
-                    })
-                    .recover_with(nested_delimiters(
-                        Token::Open(Delim::Block),
-                        Token::Close(Delim::Block),
-                        [],
-                        |span| (Expr::Error, span),
-                    )),
-            )
-            .then_ignore(just(Token::Keyword("ENDTYPE".to_string())))
-            .then(expr.clone().or_not())
-            .map_with_span(|((name, items), body), span| {
-                let body = match body {
-                    Some(t) => t,
-                    None => (Expr::Value(Value::Null), span),
-                };
-                Expr::DeclareComp(name, Box::new(items), Box::new(body))
-            });
-
-        let declare_arr = declare_prim
-            .clone()
-            .then_ignore(just(Token::Ctrl('[')))
-            .then(val.clone())
-            .then_ignore(just(Token::Ctrl(':')))
-            .then(val.clone())
-            .then_ignore(just(Token::Ctrl(']')))
-            .then_ignore(just(Token::Keyword("OF".to_string())))
-            .then(type_)
-            .then(expr.clone().or_not())
-            .map_with_span(|((((name, val1), val2), t), body), span: Span| {
-                let body = match body {
-                    Some(t) => t,
-                    None => (Expr::Value(Value::Null), span.clone()),
-                };
-                Expr::DeclareArr(
-                    name.0,
-                    Box::new((val1, span.clone())),
-                    Box::new((val2, span.clone())),
-                    t,
-                    Box::new(body),
-                )
-            })
-            .labelled("Declare_arr");
-
-        let index_resolve = ident.then(
-            expr.clone()
-                .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
-                .map(|expr| expr.0),
-        );
-
-        let dot_resolve = ident
-            .then_ignore(just(Token::Ctrl('.')))
-            .then(ident.map(|ident| Expr::Value(Value::Str(ident))));
-
-        let assign = dot_resolve
-            .clone()
-            .or(index_resolve.clone())
-            .or(ident.then(empty().to(Expr::Value(Value::Null))))
-            .then_ignore(just(Token::Op("<-".to_string())))
-            .then(expr.clone())
-            .then(expr.clone().or_not())
-            .map_with_span(|((name, v), body), span| {
-                let body = match body {
-                    Some(t) => t,
-                    None => (Expr::Value(Value::Null), span),
-                };
-
-                Expr::Assign(Box::new(name), Box::new(v), Box::new(body))
-            })
-            .labelled("assign");
-
         let items = expr
             .clone()
             .separated_by(just(Token::Ctrl(',')))
@@ -292,21 +193,6 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 just(Token::Close(Delim::Paren)),
             );
 
-        let output = just(Token::Keyword("OUTPUT".to_string()))
-            .ignore_then(
-                expr.clone()
-                    .separated_by(just(Token::Ctrl(',')))
-                    .allow_trailing(),
-            )
-            .then(expr.clone().or_not())
-            .map_with_span(|(val, body), span| {
-                let body = match body {
-                    Some(t) => t,
-                    None => (Expr::Value(Value::Null), span),
-                };
-                Expr::Output(val, Box::new(body))
-            });
-
         let call_function = ident
             .then(items.clone())
             .labelled("call")
@@ -314,41 +200,23 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let atom = val
             .or(return_.map(|a| Expr::Return(Box::new(a))))
-            .or(declare_arr)
-            .or(declare_comp)
-            .or(declare_prim.then(expr.clone().or_not()).map_with_span(
-                |((name, t), body), span| {
-                    let body = match body {
-                        Some(t) => t,
-                        None => (Expr::Value(Value::Null), span),
-                    };
-                    Expr::DeclarePrim(name, t, Box::new(body))
-                },
-            ))
-            .or(assign)
-            .or(index_resolve
-                .map_with_span(|(name, index), span| Expr::Var(name, Box::new((index, span)))))
-            .or(dot_resolve
-                .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
-            .or(output)
             .or(call_function)
-            .or(ident
-                .then(empty().to(Expr::Value(Value::Null)))
-                .map_with_span(|(ident, val), span| Expr::Var(ident, Box::new((val, span)))))
+            .or(ident.map_with_span(|ident, span: Span| {
+                Expr::Var(Box::new((Expr::Value(Value::Str(ident)), span.clone())))
+            }))
             .labelled("atom")
             .map_with_span(|expr, span| (expr, span))
             .or(expr.clone().delimited_by(
                 just(Token::Open(Delim::Paren)),
                 just(Token::Close(Delim::Paren)),
             ));
-
         let op = just(Token::Op("*".to_string()))
             .to(BinaryOp::Mul)
             .or(just(Token::Op("/".to_string())).to(BinaryOp::Div))
             .labelled("binop_mult");
         let product = atom
             .clone()
-            .then(op.then(atom).repeated())
+            .then(op.then(atom.clone()).repeated())
             .foldl(|a, (op, b)| {
                 let span = a.1.start..b.1.end;
                 (Expr::Binary(Box::new(a), op, Box::new(b)), span)
@@ -366,6 +234,37 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 (Expr::Binary(Box::new(a), op, Box::new(b)), span)
             });
 
+        let op = just(Token::Ctrl('.')).labelled("Comp_access");
+        let index = sum
+            .clone()
+            .then(
+                op.ignore_then(atom.clone())
+                    .or(sum
+                        .clone()
+                        .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))))
+                    .repeated(),
+            )
+            .foldl(|a, b| {
+                let span = a.1.start..b.1.end;
+
+                (
+                    Expr::CompVar(
+                        Box::new(a),
+                        Box::new(match b.0.clone() {
+                            Expr::Value(t) => {
+                                (Expr::Var(Box::new((Expr::Value(t), b.1.clone()))), b.1)
+                            }
+                            Expr::Binary(lhs, op, rhs) => (
+                                Expr::Var(Box::new((Expr::Binary(lhs, op, rhs), b.1.clone()))),
+                                b.1,
+                            ),
+                            _ => b,
+                        }),
+                    ),
+                    span,
+                )
+            });
+
         let op = just(Token::Op("=".to_string()))
             .to(BinaryOp::Eq)
             .or(just(Token::Op("<>".to_string())).to(BinaryOp::NotEq))
@@ -375,9 +274,9 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(just(Token::Op("<=".to_string())).to(BinaryOp::Leq))
             .labelled("binop_comp");
 
-        let compare = sum
+        let compare = index
             .clone()
-            .then(op.then(sum).repeated())
+            .then(op.then(index).repeated())
             .labelled("comp")
             .foldl(|a, (op, b)| {
                 let span = a.1.start..b.1.end;
@@ -548,15 +447,131 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                     span,
                 )
             });
+        let declare_prim = just(Token::Keyword("DECLARE".to_string()))
+            .ignore_then(ident)
+            .then_ignore(just(Token::Ctrl(':')))
+            .then(type_)
+            .then(expr.clone().or_not())
+            .map_with_span(|((name, type_), then), span: Span| {
+                (
+                    Expr::DeclarePrim(
+                        name,
+                        type_,
+                        match then {
+                            Some(t) => Box::new(t),
+                            None => Box::new((Expr::Value(Value::Null), span.clone())),
+                        },
+                    ),
+                    span.clone(),
+                )
+            })
+            .labelled("Declare_prim");
 
-        let block_expr = if_
-            .or(function)
+        let declare_arr = just(Token::Keyword("DECLARE".to_string()))
+            .ignore_then(ident)
+            .then_ignore(just(Token::Ctrl(':')))
+            .then(type_)
+            .then_ignore(just(Token::Ctrl('[')))
+            .then(expr.clone())
+            .then_ignore(just(Token::Ctrl(':')))
+            .then(expr.clone())
+            .then_ignore(just(Token::Ctrl(']')))
+            .then_ignore(just(Token::Keyword("OF".to_string())))
+            .then(type_)
+            .then(expr.clone().or_not())
+            .map_with_span(|(((((name, _), start), end), type_), then), span: Span| {
+                (
+                    Expr::DeclareArr(
+                        name,
+                        Box::new(start),
+                        Box::new(end),
+                        type_,
+                        Box::new(match then {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span.clone()),
+                        }),
+                    ),
+                    span.clone(),
+                )
+            })
+            .labelled("Declare_arr");
+
+        let assign = ident
+            .clone()
+            .then(
+                just(Token::Ctrl('.'))
+                    .ignore_then(
+                        ident
+                            .clone()
+                            .map_with_span(|ident, span| (Expr::Value(Value::Str(ident)), span)),
+                    )
+                    .or(raw_expr
+                        .clone()
+                        .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))))
+                    .repeated(),
+            )
+            .then_ignore(just(Token::Op("<-".to_string())))
+            .then(expr.clone())
+            .then(expr.clone().or_not())
+            .map_with_span(|(((name, children), v), body), span: Span| {
+                let body = match body {
+                    Some(t) => t,
+                    None => (Expr::Value(Value::Null), span.clone()),
+                };
+
+                (
+                    Expr::Assign(
+                        Box::new((Expr::Value(Value::Str(name)), span.clone())),
+                        children,
+                        Box::new(v),
+                        Box::new(body),
+                    ),
+                    span.clone(),
+                )
+            })
+            .labelled("assign");
+
+        let output = just(Token::Keyword("OUTPUT".to_string()))
+            .ignore_then(expr.clone().separated_by(just(Token::Ctrl(','))))
+            .then(expr.clone().or_not())
+            .map_with_span(|(val, body), span: Span| {
+                let body = match body {
+                    Some(t) => t,
+                    None => (Expr::Value(Value::Null), span.clone()),
+                };
+                (Expr::Output(val, Box::new(body)), span.clone())
+            });
+
+        let declare_comp = just(Token::Keyword("TYPE".to_string()))
+            .ignore_then(ident.clone())
+            .then(declare_arr.clone().or(declare_prim.clone()).delimited_by(
+                just(Token::Open(Delim::Block)),
+                just(Token::Close(Delim::Block)),
+            ))
+            .then_ignore(just(Token::Keyword("ENDTYPE".to_string())))
+            .then(expr.clone().or_not())
+            .map_with_span(|((name, items), body), span: Span| {
+                let body = match body {
+                    Some(t) => t,
+                    None => (Expr::Value(Value::Null), span.clone()),
+                };
+                (
+                    Expr::DeclareComp(name, Box::new(items), Box::new(body)),
+                    span.clone(),
+                )
+            });
+
+        if_.or(function)
             .or(procedure)
             .or(call_procedure)
             .or(while_)
-            .labelled("block");
-
-        block_expr.or(raw_expr)
+            .or(assign)
+            .or(output)
+            .or(declare_comp)
+            .or(declare_arr)
+            .or(declare_prim)
+            .or(raw_expr)
+            .labelled("block")
     })
     .then_ignore(end())
 }

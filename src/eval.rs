@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
 use crate::{
     parser::{ArgMode, BinaryOp, Expr, Value},
@@ -32,6 +32,7 @@ impl PartialEq for Types {
             Self::Composite(_) => matches!(other, Self::Composite(_)),
             Self::Enumerated(_) => matches!(other, Self::Enumerated(_)),
             Self::Func(_) => matches!(other, Self::Func(_)),
+            Self::Array(_, _, _) => matches!(other, Self::Array(_, _, _)),
             Self::Real => matches!(other, Self::Real),
             Self::String => matches!(other, Self::String),
             Self::Integer => matches!(other, Self::Integer),
@@ -65,16 +66,168 @@ impl From<Value> for Types {
             Value::Str(_) => Self::String,
             Value::Real(_) => Self::Real,
             Value::Int(_) => Self::Integer,
-            Value::Comp(h) => {
-                let mut map = HashMap::new();
-                for i in h {
-                    map.insert(i.0, i.1.to_string());
-                }
-                Self::Composite(map)
-            }
             _ => Self::Null,
         }
     }
+}
+
+fn to_type_map(
+    map: HashMap<String, String>,
+    types: &mut HashMap<String, Types>,
+    expr: &Spanned<Expr>,
+) -> Result<HashMap<String, Types>, Error> {
+    let mut new_map = HashMap::new();
+    for i in map {
+        let t = types.get(&i.1).ok_or_else(|| Error {
+            span: expr.1.clone(),
+            msg: format!(
+                "Cannot convert from referenced typemap to typemap due to '{}'",
+                i.1
+            ),
+        })?;
+        new_map.insert(i.1, t.clone());
+    }
+
+    Ok(new_map)
+}
+
+fn comp_fill(
+    map: HashMap<String, String>,
+    types: &mut HashMap<String, Types>,
+    rhs: Value,
+    expr: &(Expr, std::ops::Range<usize>),
+    last: String,
+) -> Result<HashMap<String, (String, Option<Value>)>, Error> {
+    let mut temp_types = HashMap::new();
+    for i in map.clone() {
+        // if types e.xsists locally then continue local expansion
+        match types.get(&i.1) {
+            Some(t) => match t {
+                Types::Composite(h) => {
+                    for _ in h {
+                        match types.get(&i.1) {
+                            Some(Types::Composite(_)) => {
+                                temp_types.insert(
+                                    i.0.clone(),
+                                    (
+                                        i.1.clone(),
+                                        Some(Value::Comp(comp_fill(
+                                            h.clone(),
+                                            &mut types.clone(),
+                                            rhs.clone(),
+                                            expr,
+                                            last.clone(),
+                                        )?)),
+                                    ),
+                                );
+                            }
+                            _ => {
+                                if i.0.clone() == last {
+                                    temp_types
+                                        .insert(i.0.clone(), (i.1.clone(), Some(rhs.clone())));
+                                } else {
+                                    temp_types.insert(i.0.clone(), (i.1.clone(), None));
+                                }
+                            }
+                        }
+                    }
+                }
+                Types::Array(t, s, e) => {
+                    let mut temp = HashMap::new();
+                    match types.get(t) {
+                        Some(Types::Composite(h)) => {
+                            for i in *s..*e {
+                                temp.insert(
+                                    i.to_string(),
+                                    (
+                                        t.clone(),
+                                        Some(Value::Comp(comp_fill(
+                                            h.clone(),
+                                            &mut types.clone(),
+                                            rhs.clone(),
+                                            expr,
+                                            last.clone(),
+                                        )?)),
+                                    ),
+                                );
+                            }
+                        }
+                        Some(Types::Array(t, s, e)) => {
+                            match types.get(t) {
+                                Some(Types::Composite(h)) => {
+                                    for i in *s..*e {
+                                        temp.insert(
+                                            i.to_string(),
+                                            (
+                                                t.clone(),
+                                                Some(Value::Comp(comp_fill(
+                                                    h.clone(),
+                                                    &mut types.clone(),
+                                                    rhs.clone(),
+                                                    expr,
+                                                    last.clone(),
+                                                )?)),
+                                            ),
+                                        );
+                                    }
+                                }
+                                Some(Types::Array(t, s, e)) => {
+                                    let mut h = HashMap::new();
+                                    for i in *s..*e {
+                                        h.insert(i.to_string(), t.clone());
+                                    }
+
+                                    for i in *s..*e {
+                                        temp.insert(
+                                            i.to_string(),
+                                            (
+                                                t.clone(),
+                                                Some(Value::Comp(comp_fill(
+                                                    h.clone(),
+                                                    &mut types.clone(),
+                                                    rhs.clone(),
+                                                    expr,
+                                                    last.clone(),
+                                                )?)),
+                                            ),
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    for i in *s..*e {
+                                        temp.insert(i.to_string(), (t.clone(), None::<Value>));
+                                    }
+                                    temp.insert(last.clone(), (t.clone(), Some(rhs.clone())));
+                                }
+                            };
+                        }
+                        _ => {
+                            for i in *s..*e {
+                                temp.insert(i.to_string(), (t.clone(), None::<Value>));
+                            }
+                            temp.insert(last.clone(), (t.clone(), Some(rhs.clone())));
+                        }
+                    }
+                    temp_types.insert(i.0.clone(), (i.1.clone(), Some(Value::Comp(temp))));
+                }
+                _ => {
+                    if i.0.clone() == last {
+                        temp_types.insert(i.0.clone(), (i.1.clone(), Some(rhs.clone())));
+                    } else {
+                        temp_types.insert(i.0.clone(), (i.1.clone(), None));
+                    }
+                }
+            },
+            t => {
+                return Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Unexpected type '{:?}'", t),
+                })
+            }
+        };
+    }
+
+    Ok(temp_types)
 }
 
 #[derive(Debug)]
@@ -86,370 +239,682 @@ pub struct Error {
 pub fn eval(
     expr: &Spanned<Expr>,
     vars: &mut HashMap<String, (String, Option<Value>)>,
+    local_vars: &mut HashMap<String, (String, Option<Value>)>,
     types: &mut HashMap<String, Types>,
 ) -> Result<Value, Error> {
-    //println!("{:?}\n\n{:?}\n", vars, types);
+    println!("vars:{:?}\n\ntypes:{:?}\n", vars, types);
     Ok(match &expr.0 {
         Expr::Error => unreachable!(),
         Expr::Value(val) => val.clone(),
-        Expr::Var(name, sub) => {
-            let v = vars
-                .get(name)
+        Expr::Var(name) => {
+            let name = match eval(name, vars, local_vars, types)? {
+                Value::Str(s) => s,
+                Value::Int(i) => i.to_string(),
+                n => {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("No such variable '{:?}' in scope (Value error)", n),
+                    })
+                }
+            };
+            //println!("vars:{:?}\nname:{:?}\ntypes:{:?}", vars, name, types);
+
+            let v = local_vars
+                .get(&name)
                 .ok_or_else(|| Error {
                     span: expr.1.clone(),
-                    msg: format!("No such variable '{}' in scope", name),
-                })?
+                    msg: format!("No such variable '{:?}' in scope (string error)", name),
+                })
+                .or_else(|err| vars.get(&name).ok_or(err))?
                 .to_owned();
 
-            let type_ = types.get(&v.0).unwrap();
-
-            let raw_value = v.1.clone().ok_or_else(|| Error {
-                span: expr.1.clone(),
-                msg: format!("Variable '{}' is declared but never initialized", name),
-            })?;
-
-            match type_ {
-                Types::Composite(_) => match raw_value {
-                    Value::Comp(local_hash) => {
-                        let key = eval(sub, vars, types)?;
-                        let key = match key {
-                            Value::Str(s) => Some(s),
-                            Value::Null => None,
-                            _ => {
-                                return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!(
-                                        "Cannot access composite type '{}' with non string '{}'",
-                                        name, key
-                                    ),
-                                })
-                            }
-                        };
-
-                        if let Some(key) = key {
-                            local_hash
-                                .get(&key)
-                                .ok_or_else(|| Error {
-                                    span: expr.1.clone(),
-                                    msg: format!("Field is not initalized on '{}'", name),
-                                })?
-                                .to_owned()
-                        } else {
-                            Value::Comp(local_hash)
-                        }
-                    }
-                    _ => {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Type value mismatch on '{}'", name),
-                        })
-                    }
-                },
-                Types::Func(_) => {
-                    eval(&(Expr::Call(v.0, Vec::new()), expr.1.clone()), vars, types)?
+            if let Some(type_) = types.get(&v.0) {
+                match type_ {
+                    Types::Func(_) => eval(
+                        &(Expr::Call(v.0, Vec::new()), expr.1.clone()),
+                        vars,
+                        local_vars,
+                        types,
+                    )?,
+                    _ => v.1.ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Variable '{}' has not been initialized", name),
+                    })?,
                 }
-                Types::Array(_, _, _) => match raw_value {
-                    Value::Array(v) => {
-                        let index = match eval(sub, vars, types)? {
-                            Value::Int(i) => i,
-                            t => {
-                                return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!("Cannot index array with value '{}'", t),
-                                })
-                            }
-                        };
-
-                        v.get(&index)
-                            .ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!("Value at index '{}' is not defiened", index),
-                            })?
-                            .to_owned()
-                    }
-                    t => {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Expected Array got type'{}'", t),
-                        })
-                    }
-                },
-                _ => v.1.ok_or_else(|| Error {
+            } else {
+                v.1.ok_or_else(|| Error {
                     span: expr.1.clone(),
                     msg: format!("Variable '{}' has not been initialized", name),
-                })?,
+                })?
+            }
+        }
+
+        Expr::CompVar(name, sub) => {
+            match eval(name, vars, local_vars, types)? {
+                Value::Comp(h) => {
+                    //println!("{:?}\n{:?}", h, sub);
+                    eval(sub, vars, &mut h.clone(), types)?
+                }
+                v => {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("Unexpected value '{:?}'", v),
+                    })
+                }
             }
         }
         Expr::DeclarePrim(name, type_, then) => {
+            // all primitive variables in pseudocode are initialized to a none type
             vars.insert(name.clone(), (type_.clone(), None));
-            let output = eval(then, vars, types);
+            let output = eval(then, vars, local_vars, types);
             output?
         }
-        Expr::Assign(name, rhs, then) => {
-            let mut rhs = eval(rhs, vars, types)?;
-
-            let (str_type, val) = &vars.get(&name.0).ok_or_else(|| Error {
-                span: expr.1.clone(),
-                msg: format!("No such variable '{}' in scope", &name.0),
-            })?;
-
-            let type_ = types.get(str_type).ok_or_else(|| Error {
-                span: expr.1.clone(),
-                msg: format!("No such type '{}' in scope", str_type),
-            })?;
-
-            match type_ {
-                Types::Integer => {
-                    if !rhs.is_int() {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Variable '{}' must be assigned to type INTEGER", name.0),
-                        });
-                    }
-                }
-                Types::Real => {
-                    if !rhs.is_real() {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Variable '{}' must be assigned to type REAL", name.0),
-                        });
-                    }
-                }
-                Types::Boolean => {
-                    if !rhs.is_bool() {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Variable '{}' must be assigned to type BOOLEAN", name.0),
-                        });
-                    }
-                }
-
-                Types::Char => {
-                    if !rhs.is_char() {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Variable '{}' must be assigned to type CHAR", name.0),
-                        });
-                    }
-                }
-                Types::String => {
-                    if !rhs.is_str() {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Variable '{}' must be assigned to type STRING", name.0),
-                        });
-                    }
-                }
-
-                Types::Array(raw_type_, start, end) => {
-                    let type_ = types.get(raw_type_).ok_or_else(|| Error {
+        Expr::Assign(name, children, rhs, then) => {
+            let rhs = eval(rhs, vars, local_vars, types)?;
+            let name = match eval(name, vars, local_vars, types)? {
+                Value::Str(s) => s,
+                v => {
+                    return Err(Error {
                         span: expr.1.clone(),
-                        msg: format!("Type '{}' has not been defined", raw_type_),
-                    })?;
-                    let index = match &name.1 {
-                        Expr::Value(i) => match i {
-                            Value::Int(i) => {
-                                if i > end || i < start {
-                                    return Err(Error {
-                                        span: expr.1.clone(),
-                                        msg: format!("Index '{}' out of range", i),
-                                    });
-                                }
-                                Some(i)
-                            }
-                            Value::Null => None,
-                            v => {
-                                return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!(
-                                        "Array datatype '{}' cannot be accessed by value {:?}",
-                                        name.0, v
-                                    ),
-                                })
-                            }
-                        },
-                        e => {
-                            return Err(Error {
-                                span: expr.1.clone(),
-                                msg: format!(
-                                    "Array datatype '{}' cannot be accessed by expression {:?}",
-                                    name.0, e
-                                ),
-                            })
-                        }
-                    };
-
-                    if let Some(index) = index {
-                        if let Some(arr) = val.clone() {
-                            match arr {
-                                Value::Array(mut v) => {
-                                    if Types::from(rhs.clone()) != *type_ {
-                                        return Err(Error {
-                                            span: expr.1.clone(),
-                                            msg: format!(
-                                                "Type '{:?}' cannot be assigned to type '{:?}'",
-                                                Types::from(rhs),
-                                                type_
-                                            ),
-                                        });
-                                    }
-                                    v.insert(index.clone(), rhs);
-
-                                    rhs = Value::Array(v.to_owned());
-                                }
-                                v => {
-                                    return Err(Error {
-                                        span: expr.1.clone(),
-                                        msg: format!("Unexpected value expected ARRAY got '{}'", v),
-                                    })
-                                }
-                            }
-                        } else {
-                            let mut arr = HashMap::new();
-                            if Types::from(rhs.clone()) != *type_ {
-                                return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!(
-                                        "Type '{:?}' cannot be assigned to type '{:?}'",
-                                        Types::from(rhs),
-                                        type_
-                                    ),
-                                });
-                            }
-                            arr.insert(index.clone(), rhs);
-                            rhs = Value::Array(arr.to_owned());
-                        }
-                    } else if !(Types::from(rhs.clone())
-                        == Types::Array(raw_type_.clone(), start.clone(), end.clone()))
-                    {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!(
-                                "Cannot assign '{:?}' must be assigned to type '{:?}'",
-                                Types::from(rhs.clone()),
-                                Types::Array(raw_type_.clone(), start.clone(), end.clone())
-                            ),
-                        });
-                    }
-                }
-
-                Types::Composite(h) => {
-                    let field = match &name.1 {
-                        Expr::Value(s) => match s {
-                            Value::Str(s) => Some(s),
-                            Value::Null => None,
-                            v => {
-                                return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!(
-                                        "Composite datatype '{}' cannot be accessed by value {:?}",
-                                        name.0, v
-                                    ),
-                                })
-                            }
-                        },
-                        _ => {
-                            return Err(Error {
-                                span: expr.1.clone(),
-                                msg: format!(
-                                    "Composite datatype '{}' cannot be accessed by expression {:?}",
-                                    name.0, name.1
-                                ),
-                            })
-                        }
-                    };
-                    if let Some(field) = field {
-                        if let Some(map) = val.clone() {
-                            match map {
-                                Value::Comp(mut local_h) => {
-                                    let t = h.get(field).ok_or_else(|| Error {
-                                        span: expr.1.clone(),
-                                        msg: format!(
-                                            "Field '{}' is not defined on this composite type",
-                                            field
-                                        ),
-                                    })?;
-                                    let t = types.get(t).ok_or_else(|| Error {
-                                        span: expr.1.clone(),
-                                        msg: format!("type '{}' has not been defined", t),
-                                    })?;
-
-                                    if Types::from(rhs.clone()) == *t {
-                                        local_h.insert(field.to_owned(), rhs);
-
-                                        rhs = Value::Comp(local_h);
-                                    } else {
-                                        return Err(Error {
-                                            span: expr.1.clone(),
-                                            msg: format!(
-                                            "Cannot assign '{:?}' must be assigned to type '{:?}'",
-                                            Types::from(rhs.clone()),
-                                            *t
-                                        ),
-                                        });
-                                    }
-                                }
-                                v => {
-                                    return Err(Error {
-                                        span: expr.1.clone(),
-                                        msg: format!(
-                                            "Unexpected value expected COMPOSITE got '{}'",
-                                            v
-                                        ),
-                                    })
-                                }
-                            }
-                        } else {
-                            let mut map = HashMap::new();
-                            let t = h.get(field).ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!(
-                                    "Field '{}' is not defined on this composite type",
-                                    field
-                                ),
-                            })?;
-                            let t = types.get(t).ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!("type '{}' has not been defined", t),
-                            })?;
-
-                            if Types::from(rhs.clone()) == *t {
-                                map.insert(field.to_owned(), rhs);
-
-                                rhs = Value::Comp(map);
-                            } else {
-                                return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!(
-                                        "Cannot assign '{:?}' must be assigned to type '{:?}'",
-                                        Types::from(rhs),
-                                        *t
-                                    ),
-                                });
-                            }
-                        }
-                    } else if !(Types::from(rhs.clone()) == Types::Composite(h.clone())) {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!(
-                                "Cannot assign '{:?}' must be assigned to type '{:?}'",
-                                Types::from(rhs.clone()),
-                                Types::Composite(h.clone())
-                            ),
-                        });
-                    }
-                }
-                _ => {
-                    unreachable!()
+                        msg: format!("Cannot use '{}' as a variable", v),
+                    })
                 }
             };
-            vars.insert(name.0.clone(), (str_type.clone(), Some(rhs)));
-            let output = eval(then, vars, types);
-            output?
+
+            // type of the lhs as string
+            let (type_str_, _) = vars
+                .get(&name)
+                .ok_or_else(|| Error {
+                    span: expr.1.clone(),
+                    msg: format!("'{}' Has not been declared", name),
+                })?
+                .clone();
+
+            let type_ = types
+                .get(&type_str_)
+                .ok_or_else(|| Error {
+                    span: expr.1.clone(),
+                    msg: format!("'{}' Has not been defined", type_str_),
+                })?
+                .clone();
+
+            // different actions for different types
+            match type_.clone() {
+                Types::Composite(h) => {
+                    //temporay type map to find the final type
+                    let mut temp_types = h.clone();
+                    let mut final_type = type_;
+
+                    for i in children {
+                        let i = eval(
+                            i,
+                            vars,
+                            local_vars,
+                            &mut to_type_map(temp_types.clone(), types, expr)?,
+                        )?;
+
+                        //composite types can only be accessed by ints or strings
+                        match i {
+                            Value::Str(s) => {
+                                let child_type = temp_types.get(&s).ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!(
+                                        "Child '{}' does not exsist on composite type '{:?}'",
+                                        s, temp_types
+                                    ),
+                                })?;
+
+                                match types.get(child_type) {
+                                    Some(Types::Composite(h)) => {
+                                        final_type = Types::Composite(h.clone());
+                                        temp_types = h.clone()
+                                    }
+                                    Some(Types::Array(t, s, e)) => {
+                                        let type_ = types.get(t).ok_or_else(|| Error {
+                                            span: expr.1.clone(),
+                                            msg: format!("Type '{}' has not been declared", t),
+                                        })?;
+                                        final_type = type_.clone();
+                                        if let Types::Composite(h) = type_ {
+                                            temp_types = h.clone();
+                                        }
+                                    }
+                                    Some(t) => {
+                                        final_type = t.clone();
+                                    }
+                                    t => {
+                                        return Err(Error {
+                                            span: expr.1.clone(),
+                                            msg: format!("Unexpected type '{:?}'", t),
+                                        })
+                                    }
+                                };
+                            }
+                            //we dont need to handle array indexing here, we only care about the type
+                            Value::Int(_) => {}
+                            v => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Cannot access with composite type '{}'", v),
+                                })
+                            }
+                        };
+                    }
+
+                    //composites cant have children of type null
+                    if final_type == Types::Null {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "'{}' seems to have a NULL type, which is impossible",
+                                name
+                            ),
+                        });
+                    }
+
+                    // check if the rhs has the same type as the final type
+                    if Types::from(rhs.clone()) != final_type {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "Cannot assign '{:?}' to '{:?}'",
+                                Types::from(rhs.clone()),
+                                final_type
+                            ),
+                        });
+                    }
+
+                    // updating the var_map
+                    let current_var = vars.get(&name).ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Variable '{}' has not been delcared", name),
+                    })?;
+                    let mut maps = Vec::new();
+                    if let Some(mut current_var) = current_var.1.clone() {
+                        for i in children {
+                            let i = eval(i, vars, local_vars, types)?;
+                            match i {
+                                Value::Str(s) => match current_var.clone() {
+                                    Value::Comp(h) => {
+                                        maps.push(current_var);
+                                        current_var = match h
+                                            .get(&s)
+                                            .ok_or_else(|| Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Couldn't find key '{}'", s),
+                                            })?
+                                            .clone()
+                                            .1
+                                        {
+                                            Some(t) => t,
+                                            _ => break,
+                                        };
+                                    }
+                                    v => maps.push(v),
+                                },
+                                Value::Int(i) => match current_var.clone() {
+                                    // check if child is a array
+                                    Value::Comp(h) => {
+                                        maps.push(current_var);
+                                        current_var = match h
+                                            .get(&i.to_string())
+                                            .ok_or_else(|| Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Couldn't find key '{}'", i),
+                                            })?
+                                            .clone()
+                                            .1
+                                        {
+                                            Some(t) => t,
+                                            _ => break,
+                                        };
+                                    }
+                                    v => maps.push(v),
+                                },
+                                v => {
+                                    return Err(Error {
+                                        span: expr.1.clone(),
+                                        msg: format!("Cannot access with composite type '{}'", v),
+                                    })
+                                }
+                            };
+                        }
+
+                        let mut map = rhs;
+                        let comb = maps.iter().rev().zip(children.iter().rev());
+                        for (i, index) in comb {
+                            let index = eval(
+                                index,
+                                vars,
+                                local_vars,
+                                &mut to_type_map(temp_types.clone(), types, expr)?,
+                            )?;
+                            match index {
+                                Value::Str(s) => {
+                                    match i {
+                                        Value::Comp(h) => {
+                                            let type_ = h
+                                                .get(&s)
+                                                .ok_or_else(|| Error {
+                                                    span: expr.1.clone(),
+                                                    msg: format!("Couldn't find key '{}'", s),
+                                                })?
+                                                .clone()
+                                                .0;
+                                            let mut h = h.clone();
+                                            h.insert(s, (type_, Some(map)));
+                                            map = Value::Comp(h);
+                                        }
+                                        v => {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Unexpected value '{}'", v),
+                                            })
+                                        }
+                                    };
+                                }
+                                Value::Int(i_) => {
+                                    match i {
+                                        Value::Comp(h) => {
+                                            let type_ = h
+                                                .get(&i_.to_string())
+                                                .ok_or_else(|| Error {
+                                                    span: expr.1.clone(),
+                                                    msg: format!("Couldn't find key '{}'", i_),
+                                                })?
+                                                .clone()
+                                                .0;
+                                            let mut h = h.clone();
+                                            h.insert(i_.to_string(), (type_, Some(map)));
+                                            map = Value::Comp(h);
+                                        }
+                                        v => {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Unexpected value '{}'", v),
+                                            })
+                                        }
+                                    };
+                                }
+                                v => {
+                                    return Err(Error {
+                                        span: expr.1.clone(),
+                                        msg: format!("Unexpected value '{}'", v),
+                                    })
+                                }
+                            };
+                        }
+
+                        vars.insert(name.clone(), (type_str_, Some(map)));
+
+                    // if the variable is not assigned a value we can just create a new value
+                    // this section might be more apt in declare prim but for now this is
+                    // the best place for it
+                    } else if let Value::Comp(h) = rhs {
+                        vars.insert(name.clone(), (type_str_, Some(Value::Comp(h))));
+                    } else {
+                        let last = children.last().ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: format!("No values to access composite type '{}'", name),
+                        })?;
+                        let last = match eval(last, vars, local_vars, types)? {
+                            Value::Str(s) => s,
+                            Value::Int(i) => i.to_string(),
+                            v => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Unexpected value '{}'", v),
+                                })
+                            }
+                        };
+                        vars.insert(
+                            name.clone(),
+                            (
+                                type_str_,
+                                Some(Value::Comp(comp_fill(
+                                    h.clone(),
+                                    &mut types.clone(),
+                                    rhs,
+                                    &expr.clone(),
+                                    last,
+                                )?)),
+                            ),
+                        );
+                    }
+
+                    // end of composite type actions
+                }
+                Types::Array(type_string_, start, end) => {
+                    let types_clone = types.clone();
+                    let t = types_clone.get(&type_string_).ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Type '{}' has not been declared", type_string_),
+                    })?;
+
+                    let mut h = HashMap::new();
+                    for i in start..end {
+                        h.insert(i.to_string(), type_string_.clone());
+                    }
+
+                    let mut temp_types = h.clone();
+                    let mut final_type = type_;
+
+                    for i in children {
+                        let i = eval(
+                            i,
+                            vars,
+                            local_vars,
+                            &mut to_type_map(temp_types.clone(), types, expr)?,
+                        )?;
+
+                        //composite types can only be accessed by ints or strings
+                        match i {
+                            Value::Str(s) => {
+                                let child_type = temp_types.get(&s).ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!(
+                                        "Child '{}' does not exsist on composite type '{:?}'",
+                                        s, temp_types
+                                    ),
+                                })?;
+
+                                match types.get(child_type) {
+                                    Some(Types::Composite(h)) => {
+                                        final_type = Types::Composite(h.clone());
+                                        temp_types = h.clone()
+                                    }
+                                    Some(Types::Array(t, s, e)) => {
+                                        let type_ = types.get(t).ok_or_else(|| Error {
+                                            span: expr.1.clone(),
+                                            msg: format!("Type '{}' has not been declared", t),
+                                        })?;
+                                        final_type = type_.clone();
+                                        if let Types::Composite(h) = type_ {
+                                            temp_types = h.clone();
+                                        }
+                                    }
+                                    Some(t) => {
+                                        final_type = t.clone();
+                                    }
+                                    t => {
+                                        if let Some(t) = t {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Unexpected type '{:?}'", t),
+                                            });
+                                        } else {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Expected type got '{:?}'", t),
+                                            });
+                                        }
+                                    }
+                                };
+                            }
+                            //we dont need to handle array indexing here, we only care about the type
+                            Value::Int(i) => {
+                                let s = i.to_string();
+                                let child_type = temp_types.get(&s).ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!(
+                                        "Child '{}' does not exsist on composite type '{:?}'",
+                                        s, temp_types
+                                    ),
+                                })?;
+
+                                match types.get(child_type) {
+                                    Some(Types::Composite(h)) => {
+                                        final_type = Types::Composite(h.clone());
+                                        temp_types = h.clone()
+                                    }
+                                    Some(Types::Array(t, s, e)) => {
+                                        let type_ = types.get(t).ok_or_else(|| Error {
+                                            span: expr.1.clone(),
+                                            msg: format!("Type '{}' has not been declared", t),
+                                        })?;
+                                        final_type = type_.clone();
+                                        if let Types::Composite(h) = type_ {
+                                            temp_types = h.clone();
+                                        }
+                                    }
+                                    Some(t) => {
+                                        final_type = t.clone();
+                                    }
+                                    t => {
+                                        if let Some(t) = t {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Unexpected type '{:?}'", t),
+                                            });
+                                        } else {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Expected type got '{:?}'", t),
+                                            });
+                                        }
+                                    }
+                                };
+                            }
+                            v => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Cannot access with composite type '{}'", v),
+                                })
+                            }
+                        };
+                    }
+
+                    //composites cant have children of type null
+                    if final_type == Types::Null {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "'{}' seems to have a NULL type, which is impossible",
+                                name
+                            ),
+                        });
+                    }
+
+                    // check if the rhs has the same type as the final type
+                    if Types::from(rhs.clone()) != final_type {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "Cannot assign '{:?}' to '{:?}'",
+                                Types::from(rhs.clone()),
+                                final_type
+                            ),
+                        });
+                    }
+
+                    let mut maps = Vec::new();
+                    let current_var = vars.get(&name).ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Variable '{}' has not been declared", name),
+                    })?;
+                    if let Some(mut current_var) = current_var.1.clone() {
+                        for i in children {
+                            let i = eval(i, vars, local_vars, types)?;
+                            match i {
+                                Value::Str(s) => match current_var.clone() {
+                                    Value::Comp(h) => {
+                                        maps.push(current_var);
+                                        current_var = match h.get(&s).ok_or_else(|| Error {
+                                            span: expr.1.clone(),
+                                            msg: format!("Variable '{}' has not been declared", s),
+                                        })?.clone().1 {
+                                            Some(t) => t,
+                                            _ => break,
+                                        };
+                                    }
+                                    v => maps.push(v),
+                                },
+                                Value::Int(i) => match current_var.clone() {
+                                    // check if child is a array
+                                    Value::Comp(h) => {
+                                        maps.push(current_var);
+                                        current_var = match h
+                                            .get(&i.to_string())
+                                            .ok_or_else(|| Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Variable '{}' has not been declared", i),
+                                            })?
+                                            .clone()
+                                            .1
+                                        {
+                                            Some(t) => t,
+                                            _ => break,
+                                        };
+                                    }
+                                    v => maps.push(v),
+                                },
+                                v => {
+                                    return Err(Error {
+                                        span: expr.1.clone(),
+                                        msg: format!("Cannot access with composite type '{}'", v),
+                                    })
+                                }
+                            };
+                        }
+
+                        let mut map = rhs;
+                        let comb = maps.iter().rev().zip(children.iter().rev());
+                        for (i, index) in comb {
+                            let index = eval(
+                                index,
+                                vars,
+                                local_vars,
+                                &mut to_type_map(temp_types.clone(), types, expr)?,
+                            )?;
+                            match index {
+                                Value::Str(s) => {
+                                    match i {
+                                        Value::Comp(h) => {
+                                            let type_ = h.get(&s).ok_or_else(|| Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Type '{}' has not been declared", s),
+                                            })?.clone().0;
+                                            let mut h = h.clone();
+                                            h.insert(s, (type_, Some(map)));
+                                            map = Value::Comp(h);
+                                        }
+                                        v => {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Unexpected value '{}'", v),
+                                            })
+                                        }
+                                    };
+                                }
+                                Value::Int(i_) => {
+                                    match i {
+                                        Value::Comp(h) => {
+                                            let type_ = h.get(&i_.to_string()).ok_or_else(|| Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Type '{}' has not been declared", i_),
+                                            })?.clone().0;
+                                            let mut h = h.clone();
+                                            h.insert(i_.to_string(), (type_, Some(map)));
+                                            map = Value::Comp(h);
+                                        }
+                                        v => {
+                                            return Err(Error {
+                                                span: expr.1.clone(),
+                                                msg: format!("Unexpected value '{}'", v),
+                                            })
+                                        }
+                                    };
+                                }
+                                v => {
+                                    return Err(Error {
+                                        span: expr.1.clone(),
+                                        msg: format!("Unexpected value '{}'", v),
+                                    })
+                                }
+                            };
+                        }
+
+                        vars.insert(name.clone(), (type_str_, Some(map)));
+                    } else {
+                        let last = children.last().ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot access '{}' with no keys", name),
+                        })?;
+                        let last = match eval(last, vars, local_vars, types)? {
+                            Value::Str(s) => s,
+                            Value::Int(i) => i.to_string(),
+                            v => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Unexpected value '{}'", v),
+                                })
+                            }
+                        };
+                        match t {
+                            Types::Composite(h) => vars.insert(
+                                name.clone(),
+                                (
+                                    type_string_,
+                                    Some(Value::Comp(comp_fill(
+                                        h.clone(),
+                                        &mut types.clone(),
+                                        rhs,
+                                        &expr.clone(),
+                                        last,
+                                    )?)),
+                                ),
+                            ),
+                            _ => {
+                                let last = children.last().ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Cannot access '{}' with no keys", name),
+                                })?;
+                                let last = match eval(
+                                    last,
+                                    vars,
+                                    local_vars,
+                                    types,
+                                )? {
+                                    Value::Int(i) => i.to_string(),
+                                    v => {
+                                        return Err(Error {
+                                            span: expr.1.clone(),
+                                            msg: format!("Cannot access array with value '{}'", v),
+                                        })
+                                    }
+                                };
+                                let mut temp = HashMap::new();
+                                for i in start..end {
+                                    temp.insert(i.to_string(), (type_string_.clone(), None));
+                                }
+                                temp.insert(last, (type_string_, Some(rhs)));
+                                vars.insert(name.clone(), (name.clone(), Some(Value::Comp(temp))))
+                            }
+                        };
+                    }
+                }
+                // if the variable isnt a user defined type, just assign it directly
+                t => {
+                    if t == Types::from(rhs.clone()) {
+                        vars.insert(name, (type_str_, Some(rhs)));
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "Cannot assign type '{:?}' to type '{:?}'",
+                                t,
+                                Types::from(rhs)
+                            ),
+                        });
+                    }
+                }
+            };
+
+            eval(then, vars, local_vars, types)?
         }
         Expr::Binary(a, BinaryOp::Add, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -476,14 +941,14 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Eq, b) => {
-            Value::Bool(eval(a, vars, types)? == eval(b, vars, types)?)
+            Value::Bool(eval(a, vars, local_vars, types)? == eval(b, vars, local_vars, types)?)
         }
         Expr::Binary(a, BinaryOp::NotEq, b) => {
-            Value::Bool(eval(a, vars, types)? != eval(b, vars, types)?)
+            Value::Bool(eval(a, vars, local_vars, types)? != eval(b, vars, local_vars, types)?)
         }
         Expr::Binary(a, BinaryOp::Mul, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -510,8 +975,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Sub, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -544,8 +1009,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Div, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -572,8 +1037,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Ge, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -600,8 +1065,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Geq, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -628,8 +1093,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Le, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -656,8 +1121,8 @@ pub fn eval(
             }
         }
         Expr::Binary(a, BinaryOp::Leq, b) => {
-            let a = eval(a, vars, types)?;
-            let b = eval(b, vars, types)?;
+            let a = eval(a, vars, local_vars, types)?;
+            let b = eval(b, vars, local_vars, types)?;
 
             match a {
                 Value::Int(a) => {
@@ -685,70 +1150,39 @@ pub fn eval(
         }
         Expr::Output(val, then) => {
             for i in val {
-                print!("{}", eval(i, vars, types)?);
+                print!("{}", eval(i, vars, local_vars, types)?);
             }
             println!();
-            eval(then, vars, types)?
+            eval(then, vars, local_vars, types)?
         }
         Expr::If(cond, a, b, body) => {
-            let c = eval(cond, vars, types)?;
+            let c = eval(cond, vars, local_vars, types)?;
             match c {
-                Value::Bool(true) => match eval(a, vars, types)? {
+                Value::Bool(true) => match eval(a, vars, local_vars, types)? {
                     Value::Return(t) => return Ok(Value::Return(t)),
-                    _ => return eval(body, vars, types),
+                    _ => return eval(body, vars, local_vars, types),
                 },
-                Value::Bool(false) => match eval(b, vars, types)? {
+                Value::Bool(false) => match eval(b, vars, local_vars, types)? {
                     Value::Return(t) => return Ok(Value::Return(t)),
-                    _ => return eval(body, vars, types),
+                    _ => return eval(body, vars, local_vars, types),
                 },
                 c => {
                     return Err(Error {
-                        span: cond.1.clone(),
+                        span: (**cond).1.clone(),
                         msg: format!("Conditions must be booleans, found '{:?}'", c),
                     })
                 }
             }
         }
         Expr::DeclareComp(name, items, body) => {
-            let items = eval(items, vars, types)?;
-
-            let items = match items {
-                Value::Comp(h) => h,
-                _ => unreachable!(),
-            };
-
-            let mut new_h = HashMap::new();
-
-            for i in items {
-                let type_ = match i.1 {
-                    Value::Str(s) => s,
-                    _ => unreachable!(),
-                };
-
-                match types.get(&type_).ok_or_else(|| Error {
-                    span: expr.1.clone(),
-                    msg: format!("Type '{}' hasn't been declared", type_),
-                })? {
-                    Types::Composite(_) => {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: "Cannot declare Composite with Composite sub-type".to_string(),
-                        })
-                    }
-                    Types::Func(_) => {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: "Cannot declare Composite with Function sub-type".to_string(),
-                        })
-                    }
-                    _ => {}
-                };
-
-                new_h.insert(i.0, type_);
+            let mut new_v = HashMap::new();
+            eval(items, &mut new_v, local_vars, types)?;
+            let mut map = HashMap::new();
+            for i in new_v {
+                map.insert(i.0, (i.1).0);
             }
-
-            types.insert(name.clone(), Types::Composite(new_h));
-            let output = eval(body, vars, types);
+            types.insert(name.clone(), Types::Composite(map));
+            let output = eval(body, vars, local_vars, types);
             output?
         }
         Expr::Func(name, args, type_, body, then) => {
@@ -764,11 +1198,11 @@ pub fn eval(
                 name.to_string(),
                 (name.to_string(), Some(Value::Func(name.to_string()))),
             );
-            eval(then, vars, types)?
+            eval(then, vars, local_vars, types)?
         }
         Expr::ProcCall(expr, then) => {
-            eval(expr, vars, types)?;
-            eval(then, vars, types)?
+            eval(expr, vars, local_vars, types)?;
+            eval(then, vars, local_vars, types)?
         }
         Expr::Call(func, args) => {
             //gets the function definition from the type table
@@ -792,16 +1226,23 @@ pub fn eval(
                     //type check each argument
                     for (n, i) in args.iter().enumerate() {
                         let name = match &i.0 {
-                            Expr::Var(n, _) => Some(n),
+                            Expr::Var(n) => Some(n),
                             _ => None,
                         };
                         // checks if type exsists
-                        let t_def = f.args.get(n).unwrap().clone();
+                        let t_def = f
+                            .args
+                            .get(n)
+                            .ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: format!("No arg found at index '{}'", n),
+                            })?
+                            .clone();
                         let t_type = types.get(&t_def.1).ok_or_else(|| Error {
                             span: expr.1.clone(),
                             msg: format!("Type '{}' is not declared", t_def.1),
                         })?;
-                        let v_type = Types::from(eval(i, vars, &mut types.clone())?);
+                        let v_type = Types::from(eval(i, vars, local_vars, &mut types.clone())?);
 
                         //checks if types dont match
                         if *t_type != v_type {
@@ -815,8 +1256,10 @@ pub fn eval(
                         }
 
                         //store the vars on a local var map
-                        vars_func
-                            .insert((t_def.0).1.clone(), (t_def.1, Some(eval(i, vars, types)?)));
+                        vars_func.insert(
+                            (t_def.0).1.clone(),
+                            (t_def.1, Some(eval(i, vars, local_vars, types)?)),
+                        );
 
                         // store whether the variable was passed byref
                         if (t_def.0).0 == ArgMode::Byref {
@@ -825,12 +1268,23 @@ pub fn eval(
                             }
                         }
                     }
-                    let output = eval(&f.body, &mut vars_func, types);
+                    let output = eval(&f.body, &mut vars_func, local_vars, types);
 
                     // update the variables that where passed byref
+
                     for i in reference {
+                        let name = match eval(i.0, vars, local_vars, types)? {
+                            Value::Str(s) => s,
+                            n => {
+                                return Err(Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("No such variable '{}' in scope", n),
+                                })
+                            }
+                        };
+
                         if let Some(v) = vars_func.get(&i.1) {
-                            vars.insert(i.0.to_string(), v.clone());
+                            vars.insert(name.to_string(), v.clone());
                         }
                     }
 
@@ -846,7 +1300,10 @@ pub fn eval(
                         }
                     };
 
-                    let return_type = types.get(&f.returns).unwrap();
+                    let return_type = types.get(&f.returns).ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Type '{}' has not been declared", f.returns),
+                    })?;
                     if return_type.clone() == Types::from(output.clone()) {
                         output
                     } else {
@@ -868,9 +1325,9 @@ pub fn eval(
                 }
             }
         }
-        Expr::Return(v) => Value::Return(Box::new(eval(v, vars, types)?)),
+        Expr::Return(v) => Value::Return(Box::new(eval(v, vars, local_vars, types)?)),
         Expr::DeclareArr(name, start, end, type_, then) => {
-            let start = match eval(start, vars, types)? {
+            let start = match eval(start, vars, local_vars, types)? {
                 Value::Int(i) => i,
                 v => {
                     return Err(Error {
@@ -879,7 +1336,7 @@ pub fn eval(
                     })
                 }
             };
-            let end = match eval(end, vars, types)? {
+            let end = match eval(end, vars, local_vars, types)? {
                 Value::Int(i) => i,
                 v => {
                     return Err(Error {
@@ -891,20 +1348,20 @@ pub fn eval(
 
             types.insert(name.clone(), Types::Array(type_.clone(), start, end));
             vars.insert(name.clone(), (name.clone(), None));
-            let output = eval(then, vars, types);
-            types.remove(name);
-            vars.remove(name);
+            let output = eval(then, vars, local_vars, types);
+            //types.remove(name);
+            //vars.remove(name);
             output?
         }
         Expr::While(cond, body, then) => {
-            while eval(cond, vars, types)? == Value::Bool(true) {
-                match eval(body, vars, types)? {
+            while eval(cond, vars, local_vars, types)? == Value::Bool(true) {
+                match eval(body, vars, local_vars, types)? {
                     Value::Return(t) => return Ok(Value::Return(t)),
                     v => v,
                 };
             }
 
-            eval(then, vars, types)?
+            eval(then, vars, local_vars, types)?
         }
         _ => {
             todo!()

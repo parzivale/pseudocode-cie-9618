@@ -1,0 +1,5 @@
+TYPE a
+    m:INTEGER
+ENDTYPE
+
+a.i <- 1

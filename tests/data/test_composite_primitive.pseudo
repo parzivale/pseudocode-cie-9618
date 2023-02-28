@@ -1,0 +1,15 @@
+TYPE a
+    DECLARE i:INTEGER
+    DECLARE r:REAL
+    DECLARE s:STRING
+    DECLARE c:CHAR
+    DECLARE b:BOOLEAN
+ENDTYPE
+
+DECLARE b:a
+
+b.i <- 1
+b.r <- 1.0
+b.s <- "STRING"
+b.c <- 'c'
+b.b <- TRUE
