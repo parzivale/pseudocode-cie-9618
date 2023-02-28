@@ -1,0 +1,6 @@
+IF TRUE = TRUE
+    THEN
+        OUTPUT "hi"
+    ELSE
+        OUTPUT "bye"
+ENDIF

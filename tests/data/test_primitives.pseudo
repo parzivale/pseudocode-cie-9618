@@ -1,0 +1,11 @@
+DECLARE a: INTEGER
+DECLARE b: REAL
+DECLARE c: STRING
+DECLARE d: CHAR
+DECLARE e: BOOLEAN
+
+a <- 1
+b <- 2.0
+c <- "hi there"
+d <- 'a'
+e <- TRUE

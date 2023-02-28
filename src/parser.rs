@@ -472,9 +472,9 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .then_ignore(just(Token::Ctrl(':')))
             .then(type_)
             .then_ignore(just(Token::Ctrl('[')))
-            .then(val.clone())
+            .then(expr.clone())
             .then_ignore(just(Token::Ctrl(':')))
-            .then(val.clone())
+            .then(expr.clone())
             .then_ignore(just(Token::Ctrl(']')))
             .then_ignore(just(Token::Keyword("OF".to_string())))
             .then(type_)
@@ -483,8 +483,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 (
                     Expr::DeclareArr(
                         name,
-                        Box::new((start, span.clone())),
-                        Box::new((end, span.clone())),
+                        Box::new(start),
+                        Box::new(end),
                         type_,
                         Box::new(match then {
                             Some(t) => t,
