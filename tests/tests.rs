@@ -46,3 +46,16 @@ fn test_non_key_access_composite() {
     let code = fs::read_to_string("tests\\data\\test_non_key_access_composite.pseudo").unwrap();
     assert!(pseudocode::interpret(code).is_err());
 }
+
+
+#[test]
+fn test_procedure_primitive() {
+    let code = fs::read_to_string("tests\\data\\test_procedure_primitive.pseudo").unwrap();
+    assert!(pseudocode::interpret(code).is_ok());
+}
+
+#[test]
+fn test_procedure_composite() {
+    let code = fs::read_to_string("tests\\data\\test_procedure_composite.pseudo").unwrap();
+    assert!(pseudocode::interpret(code).is_ok());
+}

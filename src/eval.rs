@@ -66,6 +66,7 @@ impl From<Value> for Types {
             Value::Str(_) => Self::String,
             Value::Real(_) => Self::Real,
             Value::Int(_) => Self::Integer,
+            Value::Comp(_) => Self::Composite(HashMap::new()),
             _ => Self::Null,
         }
     }

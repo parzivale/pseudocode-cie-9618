@@ -1,0 +1,17 @@
+PROCEDURE thingy(a:INTEGER)
+    OUTPUT a + 1
+ENDPROCEDURE
+
+DECLARE i:INTEGER
+
+i <- 1
+
+CALL thingy(i)
+
+PROCEDURE thingy2
+    DECLARE i:INTEGER
+    i <- 1
+    OUTPUT i*2
+ENDPROCEDURE
+
+CALL thingy2

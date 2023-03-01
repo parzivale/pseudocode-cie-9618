@@ -1,0 +1,21 @@
+TYPE a
+    DECLARE i:INTEGER
+ENDTYPE
+
+PROCEDURE thingy(a:a)
+    OUTPUT a.i
+ENDPROCEDURE
+
+DECLARE i:a
+
+i.i <- 1
+
+CALL thingy(i)
+
+PROCEDURE thingy2
+    DECLARE i:a
+    i.i <- 1
+    OUTPUT i.i
+ENDPROCEDURE
+
+CALL thingy2
