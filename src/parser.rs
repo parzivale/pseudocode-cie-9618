@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, ops::Range};
 
 use crate::{
     eval::Types,
@@ -197,73 +197,99 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .then(items.clone())
             .labelled("call")
             .map(|(f, args)| Expr::Call(f, args));
+        let base_expr = recursive(|base_expr| {
+            let atom = val
+                .or(return_.map(|a| Expr::Return(Box::new(a))))
+                .or(call_function)
+                .or(ident.map_with_span(|ident, span: Span| {
+                    Expr::Var(Box::new((Expr::Value(Value::Str(ident)), span.clone())))
+                }))
+                .labelled("atom")
+                .map_with_span(|expr, span| (expr, span))
+                .or(expr.clone().delimited_by(
+                    just(Token::Open(Delim::Paren)),
+                    just(Token::Close(Delim::Paren)),
+                ));
+            let op = just(Token::Ctrl('.')).labelled("Comp_access");
 
-        let atom = val
-            .or(return_.map(|a| Expr::Return(Box::new(a))))
-            .or(call_function)
-            .or(ident.map_with_span(|ident, span: Span| {
-                Expr::Var(Box::new((Expr::Value(Value::Str(ident)), span.clone())))
-            }))
-            .labelled("atom")
-            .map_with_span(|expr, span| (expr, span))
-            .or(expr.clone().delimited_by(
-                just(Token::Open(Delim::Paren)),
-                just(Token::Close(Delim::Paren)),
-            ));
-        let op = just(Token::Op("*".to_string()))
-            .to(BinaryOp::Mul)
-            .or(just(Token::Op("/".to_string())).to(BinaryOp::Div))
-            .labelled("binop_mult");
-        let product = atom
-            .clone()
-            .then(op.then(atom.clone()).repeated())
-            .foldl(|a, (op, b)| {
-                let span = a.1.start..b.1.end;
-                (Expr::Binary(Box::new(a), op, Box::new(b)), span)
-            });
+            let dot = atom
+                .clone()
+                .then(op.ignore_then(atom.clone()).repeated())
+                .foldl(|a, b| {
+                    let span = a.1.start..b.1.end;
 
-        let op = just(Token::Op("+".to_string()))
-            .to(BinaryOp::Add)
-            .or(just(Token::Op("-".to_string())).to(BinaryOp::Sub))
-            .labelled("binop_addition");
-        let sum = product
-            .clone()
-            .then(op.then(product).repeated())
-            .foldl(|a, (op, b)| {
-                let span = a.1.start..b.1.end;
-                (Expr::Binary(Box::new(a), op, Box::new(b)), span)
-            });
+                    (
+                        Expr::CompVar(
+                            Box::new(a),
+                            Box::new(match b.0.clone() {
+                                Expr::Value(t) => {
+                                    (Expr::Var(Box::new((Expr::Value(t), b.1.clone()))), b.1)
+                                }
+                                Expr::Binary(lhs, op, rhs) => (
+                                    Expr::Var(Box::new((Expr::Binary(lhs, op, rhs), b.1.clone()))),
+                                    b.1,
+                                ),
+                                _ => b,
+                            }),
+                        ),
+                        span,
+                    )
+                });
 
-        let op = just(Token::Ctrl('.')).labelled("Comp_access");
-        let index = sum
-            .clone()
-            .then(
-                op.ignore_then(atom.clone())
-                    .or(sum
+            let index = dot
+                .clone()
+                .then(
+                    base_expr
                         .clone()
-                        .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))))
-                    .repeated(),
-            )
-            .foldl(|a, b| {
-                let span = a.1.start..b.1.end;
-
-                (
-                    Expr::CompVar(
-                        Box::new(a),
-                        Box::new(match b.0.clone() {
-                            Expr::Value(t) => {
-                                (Expr::Var(Box::new((Expr::Value(t), b.1.clone()))), b.1)
-                            }
-                            Expr::Binary(lhs, op, rhs) => (
-                                Expr::Var(Box::new((Expr::Binary(lhs, op, rhs), b.1.clone()))),
-                                b.1,
-                            ),
-                            _ => b,
-                        }),
-                    ),
-                    span,
+                        .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
+                        .repeated(),
                 )
-            });
+                .foldl(|a, b: (Expr, Range<usize>)| {
+                    let span = a.1.start..b.1.end;
+
+                    (
+                        Expr::CompVar(
+                            Box::new(a),
+                            Box::new(match b.0.clone() {
+                                Expr::Value(t) => {
+                                    (Expr::Var(Box::new((Expr::Value(t), b.1.clone()))), b.1)
+                                }
+                                Expr::Binary(lhs, op, rhs) => (
+                                    Expr::Var(Box::new((Expr::Binary(lhs, op, rhs), b.1.clone()))),
+                                    b.1,
+                                ),
+                                _ => b,
+                            }),
+                        ),
+                        span,
+                    )
+                });
+            let op = just(Token::Op("*".to_string()))
+                .to(BinaryOp::Mul)
+                .or(just(Token::Op("/".to_string())).to(BinaryOp::Div))
+                .labelled("binop_mult");
+            let product =
+                index
+                    .clone()
+                    .then(op.then(index.clone()).repeated())
+                    .foldl(|a, (op, b)| {
+                        let span = a.1.start..b.1.end;
+                        (Expr::Binary(Box::new(a), op, Box::new(b)), span)
+                    });
+
+            let op = just(Token::Op("+".to_string()))
+                .to(BinaryOp::Add)
+                .or(just(Token::Op("-".to_string())).to(BinaryOp::Sub))
+                .labelled("binop_addition");
+            let sum = product
+                .clone()
+                .then(op.then(product).repeated())
+                .foldl(|a, (op, b)| {
+                    let span = a.1.start..b.1.end;
+                    (Expr::Binary(Box::new(a), op, Box::new(b)), span)
+                });
+            sum
+        });
 
         let op = just(Token::Op("=".to_string()))
             .to(BinaryOp::Eq)
@@ -274,9 +300,9 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(just(Token::Op("<=".to_string())).to(BinaryOp::Leq))
             .labelled("binop_comp");
 
-        let compare = index
+        let compare = base_expr
             .clone()
-            .then(op.then(index).repeated())
+            .then(op.then(base_expr).repeated())
             .labelled("comp")
             .foldl(|a, (op, b)| {
                 let span = a.1.start..b.1.end;

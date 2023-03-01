@@ -740,10 +740,18 @@ pub fn eval(
                                 Value::Str(s) => match current_var.clone() {
                                     Value::Comp(h) => {
                                         maps.push(current_var);
-                                        current_var = match h.get(&s).ok_or_else(|| Error {
-                                            span: expr.1.clone(),
-                                            msg: format!("Variable '{}' has not been declared", s),
-                                        })?.clone().1 {
+                                        current_var = match h
+                                            .get(&s)
+                                            .ok_or_else(|| Error {
+                                                span: expr.1.clone(),
+                                                msg: format!(
+                                                    "Variable '{}' has not been declared",
+                                                    s
+                                                ),
+                                            })?
+                                            .clone()
+                                            .1
+                                        {
                                             Some(t) => t,
                                             _ => break,
                                         };
@@ -758,7 +766,10 @@ pub fn eval(
                                             .get(&i.to_string())
                                             .ok_or_else(|| Error {
                                                 span: expr.1.clone(),
-                                                msg: format!("Variable '{}' has not been declared", i),
+                                                msg: format!(
+                                                    "Variable '{}' has not been declared",
+                                                    i
+                                                ),
                                             })?
                                             .clone()
                                             .1
@@ -791,10 +802,17 @@ pub fn eval(
                                 Value::Str(s) => {
                                     match i {
                                         Value::Comp(h) => {
-                                            let type_ = h.get(&s).ok_or_else(|| Error {
-                                                span: expr.1.clone(),
-                                                msg: format!("Type '{}' has not been declared", s),
-                                            })?.clone().0;
+                                            let type_ = h
+                                                .get(&s)
+                                                .ok_or_else(|| Error {
+                                                    span: expr.1.clone(),
+                                                    msg: format!(
+                                                        "Type '{}' has not been declared",
+                                                        s
+                                                    ),
+                                                })?
+                                                .clone()
+                                                .0;
                                             let mut h = h.clone();
                                             h.insert(s, (type_, Some(map)));
                                             map = Value::Comp(h);
@@ -810,10 +828,17 @@ pub fn eval(
                                 Value::Int(i_) => {
                                     match i {
                                         Value::Comp(h) => {
-                                            let type_ = h.get(&i_.to_string()).ok_or_else(|| Error {
-                                                span: expr.1.clone(),
-                                                msg: format!("Type '{}' has not been declared", i_),
-                                            })?.clone().0;
+                                            let type_ = h
+                                                .get(&i_.to_string())
+                                                .ok_or_else(|| Error {
+                                                    span: expr.1.clone(),
+                                                    msg: format!(
+                                                        "Type '{}' has not been declared",
+                                                        i_
+                                                    ),
+                                                })?
+                                                .clone()
+                                                .0;
                                             let mut h = h.clone();
                                             h.insert(i_.to_string(), (type_, Some(map)));
                                             map = Value::Comp(h);
@@ -870,12 +895,7 @@ pub fn eval(
                                     span: expr.1.clone(),
                                     msg: format!("Cannot access '{}' with no keys", name),
                                 })?;
-                                let last = match eval(
-                                    last,
-                                    vars,
-                                    local_vars,
-                                    types,
-                                )? {
+                                let last = match eval(last, vars, local_vars, types)? {
                                     Value::Int(i) => i.to_string(),
                                     v => {
                                         return Err(Error {
