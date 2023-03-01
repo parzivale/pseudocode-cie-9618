@@ -3,7 +3,7 @@ TYPE a
 ENDTYPE
 
 PROCEDURE thingy(a:a)
-    OUTPUT a.i
+    OUTPUT a.i + 1
 ENDPROCEDURE
 
 DECLARE i:a
@@ -14,8 +14,8 @@ CALL thingy(i)
 
 PROCEDURE thingy2
     DECLARE i:a
-    i.i <- 1
-    OUTPUT i.i
+    i.i <- 4
+    OUTPUT i.i * 2
 ENDPROCEDURE
 
 CALL thingy2
