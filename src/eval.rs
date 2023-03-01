@@ -243,7 +243,7 @@ pub fn eval(
     local_vars: &mut HashMap<String, (String, Option<Value>)>,
     types: &mut HashMap<String, Types>,
 ) -> Result<Value, Error> {
-    println!("vars:{:?}\n\ntypes:{:?}\n", vars, types);
+    //println!("vars:{:?}\n\ntypes:{:?}\n", vars, types);
     Ok(match &expr.0 {
         Expr::Error => unreachable!(),
         Expr::Value(val) => val.clone(),
