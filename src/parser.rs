@@ -151,7 +151,7 @@ pub enum Expr {
     For(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
-    Input(String),
+    Input(String, Box<Spanned<Self>>),
 }
 
 pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
@@ -568,6 +568,17 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 (Expr::Output(val, Box::new(body)), span.clone())
             });
 
+        let input = just(Token::Keyword("INPUT".to_string()))
+            .ignore_then(ident.clone())
+            .then(expr.clone().or_not())
+            .map_with_span(|(val, body), span: Span| {
+                let body = match body {
+                    Some(t) => t,
+                    None => (Expr::Value(Value::Null), span.clone()),
+                };
+                (Expr::Input(val, Box::new(body)), span.clone())
+            });
+
         let declare_comp = just(Token::Keyword("TYPE".to_string()))
             .ignore_then(ident.clone())
             .then(declare_arr.clone().or(declare_prim.clone()).delimited_by(
@@ -593,6 +604,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(while_)
             .or(assign)
             .or(output)
+            .or(input)
             .or(declare_comp)
             .or(declare_arr)
             .or(declare_prim)
