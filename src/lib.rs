@@ -6,6 +6,7 @@ mod eval;
 mod lexer;
 mod parser;
 mod prelude;
+mod utils;
 use eval::*;
 use lexer::*;
 use parser::*;
