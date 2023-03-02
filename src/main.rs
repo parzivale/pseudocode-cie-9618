@@ -1,4 +1,4 @@
-use std::{env, fs, error::Error};
+use std::{env, error::Error, fs};
 
 use ariadne::Source;
 
