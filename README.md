@@ -8,6 +8,8 @@ An implementation of the CIE 9618 pseudocode spec, with designed with [this refe
 pseucode_interpreter.exe "yourfile.pseudo"
 ```
 
+### When compiling from source
+
 To run with the parse tree and abstract syntax tree shown run in dev mode
 
 ```bash
