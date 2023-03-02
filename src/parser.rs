@@ -1,7 +1,6 @@
 use std::{collections::HashMap, fmt::Display, ops::Range};
 
 use crate::{
-    eval::Types,
     lexer::{Delim, Token},
     prelude::*,
 };
@@ -17,62 +16,6 @@ pub enum Value {
     Comp(HashMap<String, (String, Option<Value>)>),
     Func(String),
     Return(Box<Self>),
-}
-
-impl Value {
-    pub fn is_null(&self) -> bool {
-        match self {
-            Value::Null => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_bool(&self) -> bool {
-        match self {
-            Value::Bool(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_int(&self) -> bool {
-        match self {
-            Value::Int(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_real(&self) -> bool {
-        match self {
-            Value::Real(_) => true,
-            _ => false,
-        }
-    }
-    pub fn is_str(&self) -> bool {
-        match self {
-            Value::Str(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_char(&self) -> bool {
-        match self {
-            Value::Char(_) => true,
-            _ => false,
-        }
-    }
-    pub fn is_comp(&self) -> bool {
-        match self {
-            Value::Comp(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_func(&self) -> bool {
-        match self {
-            Value::Func(_) => true,
-            _ => false,
-        }
-    }
 }
 
 impl Display for Value {
@@ -112,7 +55,6 @@ pub enum ArgMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Error,
-    Name(Box<Spanned<Self>>),
     Value(Value),
     CompVar(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Var(Box<Spanned<Self>>),
@@ -176,11 +118,11 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
         }
         .labelled("value");
 
-        let ident = select! {Token::Ident(item) => item.clone()}.labelled("indentifier");
+        let ident = select! {Token::Ident(item) => item}.labelled("indentifier");
 
         let return_ = just(Token::Keyword("RETURN".to_string())).ignore_then(expr.clone());
 
-        let type_ = select! { Token::Type(type_) => type_.clone() }
+        let type_ = select! { Token::Type(type_) => type_}
             .labelled("type")
             .or(ident);
 
@@ -202,7 +144,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 .or(return_.map(|a| Expr::Return(Box::new(a))))
                 .or(call_function)
                 .or(ident.map_with_span(|ident, span: Span| {
-                    Expr::Var(Box::new((Expr::Value(Value::Str(ident)), span.clone())))
+                    Expr::Var(Box::new((Expr::Value(Value::Str(ident)), span)))
                 }))
                 .labelled("atom")
                 .map_with_span(|expr, span| (expr, span))
@@ -212,39 +154,16 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 ));
             let op = just(Token::Ctrl('.')).labelled("Comp_access");
 
-            let dot = atom
-                .clone()
-                .then(op.ignore_then(atom.clone()).repeated())
-                .foldl(|a, b| {
-                    let span = a.1.start..b.1.end;
-
-                    (
-                        Expr::CompVar(
-                            Box::new(a),
-                            Box::new(match b.0.clone() {
-                                Expr::Value(t) => {
-                                    (Expr::Var(Box::new((Expr::Value(t), b.1.clone()))), b.1)
-                                }
-                                Expr::Binary(lhs, op, rhs) => (
-                                    Expr::Var(Box::new((Expr::Binary(lhs, op, rhs), b.1.clone()))),
-                                    b.1,
-                                ),
-                                _ => b,
-                            }),
-                        ),
-                        span,
-                    )
-                });
-
-            let index = dot
+            let index = atom
                 .clone()
                 .then(
                     base_expr
                         .clone()
                         .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
+                        .or(op.ignore_then(atom.clone()))
                         .repeated(),
                 )
-                .foldl(|a, b: (Expr, Range<usize>)| {
+                .foldl(|a: (Expr, Range<usize>), b: (Expr, Range<usize>)| {
                     let span = a.1.start..b.1.end;
 
                     (
@@ -281,14 +200,13 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 .to(BinaryOp::Add)
                 .or(just(Token::Op("-".to_string())).to(BinaryOp::Sub))
                 .labelled("binop_addition");
-            let sum = product
+            product
                 .clone()
                 .then(op.then(product).repeated())
                 .foldl(|a, (op, b)| {
                     let span = a.1.start..b.1.end;
                     (Expr::Binary(Box::new(a), op, Box::new(b)), span)
-                });
-            sum
+                })
         });
 
         let op = just(Token::Op("=".to_string()))
@@ -366,7 +284,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                                 None => (Expr::Value(Value::Null), span.clone()),
                             }),
                         ),
-                        span.clone(),
+                        span,
                     )
                 })
         });
@@ -385,9 +303,9 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 },
                 None => ArgMode::Byval,
             })
-            .then(ident.clone())
+            .then(ident)
             .then_ignore(just(Token::Ctrl(':')))
-            .then(type_.clone())
+            .then(type_)
             .separated_by(just(Token::Ctrl(',')))
             .allow_trailing()
             .delimited_by(
@@ -419,7 +337,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                             None => (Expr::Value(Value::Null), span.clone()),
                         }),
                     ),
-                    span.clone(),
+                    span,
                 )
             });
         let function = just(Token::Keyword("FUNCTION".to_string()))
@@ -488,7 +406,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                             None => Box::new((Expr::Value(Value::Null), span.clone())),
                         },
                     ),
-                    span.clone(),
+                    span,
                 )
             })
             .labelled("Declare_prim");
@@ -517,19 +435,16 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                             None => (Expr::Value(Value::Null), span.clone()),
                         }),
                     ),
-                    span.clone(),
+                    span,
                 )
             })
             .labelled("Declare_arr");
 
         let assign = ident
-            .clone()
             .then(
                 just(Token::Ctrl('.'))
                     .ignore_then(
-                        ident
-                            .clone()
-                            .map_with_span(|ident, span| (Expr::Value(Value::Str(ident)), span)),
+                        ident.map_with_span(|ident, span| (Expr::Value(Value::Str(ident)), span)),
                     )
                     .or(raw_expr
                         .clone()
@@ -552,7 +467,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                         Box::new(v),
                         Box::new(body),
                     ),
-                    span.clone(),
+                    span,
                 )
             })
             .labelled("assign");

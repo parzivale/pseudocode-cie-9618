@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
+use ariadne::{Color, Fmt, Label, Report, ReportKind};
 
 mod eval;
 mod lexer;

@@ -1,8 +1,5 @@
-use std::fmt;
-
-use chumsky::text::{newline, Character};
-
 use crate::prelude::*;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Token {
@@ -81,7 +78,7 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
             .ignore_then(filter(|c| *c != '\''))
             .then_ignore(just('\''))
             .map(Token::Char);
-        let ctrl = one_of::<_, _, Simple<char>>(":,.[]").map(|c| Token::Ctrl(c));
+        let ctrl = one_of::<_, _, Simple<char>>(":,.[]").map(Token::Ctrl);
 
         let op = one_of::<_, _, Simple<char>>("+-*/=<>&")
             .repeated()
@@ -130,11 +127,10 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
         });
 
         let token = num
-            .clone()
-            .or(char_.clone())
-            .or(str_.clone())
+            .or(char_)
+            .or(str_)
             .or(op.clone())
-            .or(ident.clone())
+            .or(ident)
             .or(ctrl.clone())
             .map(TokenTree::Token);
 

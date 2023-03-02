@@ -1,0 +1,12 @@
+TYPE a
+    DECLARE m:b
+ENDTYPE
+
+TYPE b
+    DECLARE i:INTEGER
+ENDTYPE
+
+DECLARE c:ARRAY[1:10] OF a
+
+c[1].m.i <- 1
+OUTPUT c[1].m.i
