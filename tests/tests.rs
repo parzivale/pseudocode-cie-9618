@@ -58,3 +58,9 @@ fn test_procedure_composite() {
     let code = fs::read_to_string("tests/data/test_procedure_composite.pseudo").unwrap();
     assert!(pseudocode::interpret(code).is_ok());
 }
+
+#[test]
+fn test_array_composite() {
+    let code = fs::read_to_string("tests/data/test_array_composite.pseudo").unwrap();
+    assert!(pseudocode::interpret(code).is_ok());
+}
