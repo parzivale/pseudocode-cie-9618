@@ -33,7 +33,7 @@ impl Display for Value {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -46,7 +46,7 @@ pub enum BinaryOp {
     Ge,
     Geq,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArgMode {
     Byref,
     Byval,
@@ -480,11 +480,11 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                     Some(t) => t,
                     None => (Expr::Value(Value::Null), span.clone()),
                 };
-                (Expr::Output(val, Box::new(body)), span.clone())
+                (Expr::Output(val, Box::new(body)), span)
             });
 
         let declare_comp = just(Token::Keyword("TYPE".to_string()))
-            .ignore_then(ident.clone())
+            .ignore_then(ident)
             .then(declare_arr.clone().or(declare_prim.clone()).delimited_by(
                 just(Token::Open(Delim::Block)),
                 just(Token::Close(Delim::Block)),
@@ -498,7 +498,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 };
                 (
                     Expr::DeclareComp(name, Box::new(items), Box::new(body)),
-                    span.clone(),
+                    span,
                 )
             });
 

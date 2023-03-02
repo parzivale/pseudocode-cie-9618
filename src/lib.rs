@@ -28,7 +28,7 @@ pub fn interpret(code: String) -> Result<(), Vec<ariadne::Report>> {
 
         let (ast, parse_errs) = parser().parse_recovery(token_stream);
 
-        let mut types = HashMap::from([
+        let types = HashMap::from([
             ("INTEGER".to_string(), Types::Integer),
             ("REAL".to_string(), Types::Real),
             ("BOOLEAN".to_string(), Types::Boolean),
@@ -41,7 +41,11 @@ pub fn interpret(code: String) -> Result<(), Vec<ariadne::Report>> {
                 println!("--- Abstract Syntax Tree ---\n{:#?}\n", ast);
             }
             println!("--- OUTPUT ---");
-            match eval(&ast, &mut HashMap::new(), &mut HashMap::new(), &mut types) {
+
+            let mut ctx = Ctx::new();
+            ctx.types = types;
+
+            match eval(&ast, &mut ctx) {
                 Ok(_) => {}
                 Err(e) => errs.push(Simple::custom(e.span, e.msg)),
             }

@@ -1,15 +1,15 @@
 use crate::{
-    eval::{eval, Error, Types},
+    eval::{eval, Ctx, Error, Types},
     parser::{Expr, Value},
     prelude::*,
 };
-use std::{collections::HashMap, ops::Range};
+use std::collections::HashMap;
 
 pub fn comp_fill(
     map: HashMap<String, String>,
     types: &mut HashMap<String, Types>,
     rhs: Value,
-    expr: &(Expr, std::ops::Range<usize>),
+    expr: &Spanned<Expr>,
     last: String,
 ) -> Result<HashMap<String, (String, Option<Value>)>, Error> {
     let mut temp_types = HashMap::new();
@@ -164,23 +164,30 @@ pub fn to_type_map(
     Ok(new_map)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_comp_vars(
     current_var: (String, Option<Value>),
-    children: &Vec<(Expr, Range<usize>)>,
-    vars: &mut HashMap<String, (String, Option<Value>)>,
-    local_vars: &mut HashMap<String, (String, Option<Value>)>,
-    types: &mut HashMap<String, Types>,
-    expr: &(Expr, Range<usize>),
+    children: &Vec<Spanned<Expr>>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
     temp_types: HashMap<String, String>,
     rhs: Value,
     name: String,
-    type_str_: String,
     h: HashMap<String, String>,
 ) -> Result<(), Error> {
+    let (type_str_, _) = ctx
+        .vars
+        .get(&name)
+        .ok_or_else(|| Error {
+            span: expr.1.clone(),
+            msg: format!("'{}' Has not been declared", name),
+        })?
+        .clone();
+
     let mut maps = Vec::new();
-    if let Some(mut current_var) = current_var.1.clone() {
+    if let Some(mut current_var) = current_var.1 {
         for i in children {
-            let i = eval(i, vars, local_vars, types)?;
+            let i = eval(i, ctx)?;
             match i {
                 Value::Str(s) => match current_var.clone() {
                     Value::Comp(h) => {
@@ -231,12 +238,12 @@ pub fn update_comp_vars(
         let mut map = rhs;
         let comb = maps.iter().rev().zip(children.iter().rev());
         for (i, index) in comb {
-            let index = eval(
-                index,
-                vars,
-                local_vars,
-                &mut to_type_map(temp_types.clone(), types, expr)?,
-            )?;
+            let mut temp_ctx = Ctx {
+                vars: ctx.vars.clone(),
+                types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
+                local_vars: ctx.local_vars.clone(),
+            };
+            let index = eval(index, &mut temp_ctx)?;
             match index {
                 Value::Str(s) => {
                     match i {
@@ -293,19 +300,20 @@ pub fn update_comp_vars(
             };
         }
 
-        vars.insert(name.clone(), (type_str_, Some(map)));
+        ctx.vars.insert(name.clone(), (type_str_, Some(map)));
 
     // if the variable is not assigned a value we can just create a new value
     // this section might be more apt in declare prim but for now this is
     // the best place for it
     } else if let Value::Comp(h) = rhs {
-        vars.insert(name.clone(), (type_str_, Some(Value::Comp(h))));
+        ctx.vars
+            .insert(name.clone(), (type_str_, Some(Value::Comp(h))));
     } else {
         let last = children.last().ok_or_else(|| Error {
             span: expr.1.clone(),
             msg: format!("No values to access composite type '{}'", name),
         })?;
-        let last = match eval(last, vars, local_vars, types)? {
+        let last = match eval(last, ctx)? {
             Value::Str(s) => s,
             Value::Int(i) => i.to_string(),
             v => {
@@ -315,13 +323,13 @@ pub fn update_comp_vars(
                 })
             }
         };
-        vars.insert(
+        ctx.vars.insert(
             name.clone(),
             (
                 type_str_,
                 Some(Value::Comp(comp_fill(
                     h,
-                    &mut types.clone(),
+                    &mut ctx.types.clone(),
                     rhs,
                     &expr.clone(),
                     last,
@@ -334,10 +342,8 @@ pub fn update_comp_vars(
 
 #[allow(clippy::too_many_arguments)]
 pub fn type_check_comp(
-    children: &Vec<(Expr, Range<usize>)>,
-    vars: &mut HashMap<String, (String, Option<Value>)>,
-    local_vars: &mut HashMap<String, (String, Option<Value>)>,
-    types: &mut HashMap<String, Types>,
+    children: &Vec<Spanned<Expr>>,
+    ctx: &mut Ctx,
     mut temp_types: HashMap<String, String>,
     expr: &Spanned<Expr>,
     mut final_type: Types,
@@ -345,12 +351,13 @@ pub fn type_check_comp(
     name: &String,
 ) -> Result<HashMap<String, String>, Error> {
     for i in children {
-        let i = eval(
-            i,
-            vars,
-            local_vars,
-            &mut to_type_map(temp_types.clone(), types, expr)?,
-        )?;
+        let mut temp_ctx = Ctx {
+            vars: ctx.vars.clone(),
+            local_vars: ctx.local_vars.clone(),
+            types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
+        };
+
+        let i = eval(i, &mut temp_ctx)?;
 
         //composite types can only be accessed by ints or strings
         match i {
@@ -363,13 +370,13 @@ pub fn type_check_comp(
                     ),
                 })?;
 
-                match types.get(child_type) {
+                match ctx.types.get(child_type) {
                     Some(Types::Composite(h)) => {
                         final_type = Types::Composite(h.clone());
                         temp_types = h.clone()
                     }
                     Some(Types::Array(t, _, _)) => {
-                        let type_ = types.get(t).ok_or_else(|| Error {
+                        let type_ = ctx.types.get(t).ok_or_else(|| Error {
                             span: expr.1.clone(),
                             msg: format!("Type '{}' has not been declared", t),
                         })?;
@@ -400,13 +407,13 @@ pub fn type_check_comp(
                     ),
                 })?;
 
-                match types.get(child_type) {
+                match ctx.types.get(child_type) {
                     Some(Types::Composite(h)) => {
                         final_type = Types::Composite(h.clone());
                         temp_types = h.clone()
                     }
                     Some(Types::Array(t, _, _)) => {
-                        let type_ = types.get(t).ok_or_else(|| Error {
+                        let type_ = ctx.types.get(t).ok_or_else(|| Error {
                             span: expr.1.clone(),
                             msg: format!("Type '{}' has not been declared", t),
                         })?;
