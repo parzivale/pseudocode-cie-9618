@@ -22,12 +22,12 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Null => write!(f, "Null"),
-            Value::Int(s) => write!(f, "{:?}", s),
-            Value::Real(s) => write!(f, "{:?}", s),
-            Value::Bool(s) => write!(f, "{:?}", s),
-            Value::Str(s) => write!(f, "{:?}", s),
-            Value::Char(s) => write!(f, "{:?}", s),
-            Value::Func(s) => write!(f, "{:?}", s),
+            Value::Int(s) => write!(f, "{}", s),
+            Value::Real(s) => write!(f, "{}", s),
+            Value::Bool(s) => write!(f, "{}", s),
+            Value::Str(s) => write!(f, "{}", s),
+            Value::Char(s) => write!(f, "{}", s),
+            Value::Func(s) => write!(f, "{}", s),
             _ => write!(f, "display isnt available for this type"),
         }
     }
@@ -93,7 +93,8 @@ pub enum Expr {
     For(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
-    Input(String),
+    Input(String, Box<Spanned<Self>>),
+    End,
 }
 
 pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
@@ -483,6 +484,17 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 (Expr::Output(val, Box::new(body)), span)
             });
 
+        let input = just(Token::Keyword("INPUT".to_string()))
+            .ignore_then(ident)
+            .then(expr.clone().or_not())
+            .map_with_span(|(val, body), span: Span| {
+                let body = match body {
+                    Some(t) => t,
+                    None => (Expr::Value(Value::Null), span.clone()),
+                };
+                (Expr::Input(val, Box::new(body)), span)
+            });
+
         let declare_comp = just(Token::Keyword("TYPE".to_string()))
             .ignore_then(ident)
             .then(declare_arr.clone().or(declare_prim.clone()).delimited_by(
@@ -508,11 +520,12 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(while_)
             .or(assign)
             .or(output)
+            .or(input)
             .or(declare_comp)
             .or(declare_arr)
             .or(declare_prim)
             .or(raw_expr)
+            .or(end().map_with_span(|_, span| (Expr::End, span)))
             .labelled("block")
     })
-    .then_ignore(end())
 }

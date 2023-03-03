@@ -3,7 +3,7 @@ use crate::{
     parser::{Expr, Value},
     prelude::*,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 pub fn comp_fill(
     map: HashMap<String, String>,
@@ -242,6 +242,8 @@ pub fn update_comp_vars(
                 vars: ctx.vars.clone(),
                 types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
                 local_vars: ctx.local_vars.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
             };
             let index = eval(index, &mut temp_ctx)?;
             match index {
@@ -355,6 +357,8 @@ pub fn type_check_comp(
             vars: ctx.vars.clone(),
             local_vars: ctx.local_vars.clone(),
             types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
+            channel: ctx.channel.clone(),
+            input: Arc::clone(&ctx.input),
         };
 
         let i = eval(i, &mut temp_ctx)?;

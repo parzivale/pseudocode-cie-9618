@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{mpsc::*, Arc, Mutex},
+    thread,
+};
 
 use crate::{
     parser::{ArgMode, BinaryOp, Expr, Value},
@@ -84,6 +88,8 @@ pub struct Ctx {
     pub vars: VarMap,
     pub local_vars: VarMap,
     pub types: TypeMap,
+    pub channel: Sender<Actions>,
+    pub input: Arc<Mutex<String>>,
 }
 
 impl Ctx {
@@ -92,6 +98,8 @@ impl Ctx {
             vars: HashMap::new(),
             local_vars: HashMap::new(),
             types: HashMap::new(),
+            channel: channel().0,
+            input: Arc::new(Mutex::new("".to_string())),
         }
     }
 }
@@ -148,6 +156,8 @@ fn comp_var(
                 vars: ctx.vars.clone(),
                 local_vars: h,
                 types: ctx.types.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
             };
 
             eval(sub, &mut ctx)?
@@ -290,9 +300,13 @@ fn assign(
 }
 
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
-    //println!("vars:{:?}\n\ntypes:{:?}\n", vars, types);
+    //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
     Ok(match &expr.0 {
         Expr::Error => unreachable!(),
+        Expr::End => {
+            ctx.channel.send(Actions::End).unwrap();
+            Value::Null
+        }
         Expr::Value(val) => val.clone(),
         Expr::Var(name) => var(expr, ctx, name)?,
         Expr::CompVar(name, sub) => comp_var(expr, ctx, name, sub)?,
@@ -532,9 +546,12 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
         }
         Expr::Output(val, then) => {
             for i in val {
-                print!("{}", eval(i, ctx)?);
+                let out = eval(i, ctx)?;
+                ctx.channel
+                    .send(Actions::Output(format!("{out} ")))
+                    .unwrap();
             }
-            println!();
+            ctx.channel.send(Actions::Output("\n".to_string())).unwrap();
             eval(then, ctx)?
         }
         Expr::If(cond, a, b, body) => {
@@ -561,6 +578,8 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                 local_vars: ctx.local_vars.clone(),
                 types: ctx.types.clone(),
                 vars: HashMap::new(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
             };
             eval(items, &mut ctx_temp)?;
             let mut map = HashMap::new();
@@ -661,6 +680,8 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         vars: vars_func,
                         local_vars: ctx.local_vars.clone(),
                         types: ctx.types.clone(),
+                        channel: ctx.channel.clone(),
+                        input: Arc::clone(&ctx.input),
                     };
 
                     let output = eval(&f.body, &mut temp_ctx);
@@ -757,6 +778,27 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                 };
             }
 
+            eval(then, ctx)?
+        }
+        Expr::Input(var, then) => {
+            ctx.channel.send(Actions::Input).unwrap();
+            thread::park();
+
+            {
+                let string = (*ctx.input.lock().unwrap()).trim().to_string();
+
+                if ctx.vars.get(var).is_some() {
+                    ctx.vars.insert(
+                        var.clone(),
+                        ("STRING".to_string(), Some(Value::Str(string))),
+                    );
+                } else {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("Var '{}' has not been declared", var),
+                    });
+                }
+            }
             eval(then, ctx)?
         }
         _ => {
