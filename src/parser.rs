@@ -22,12 +22,12 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Null => write!(f, "Null"),
-            Value::Int(s) => write!(f, "{:?}", s),
-            Value::Real(s) => write!(f, "{:?}", s),
-            Value::Bool(s) => write!(f, "{:?}", s),
-            Value::Str(s) => write!(f, "{:?}", s),
-            Value::Char(s) => write!(f, "{:?}", s),
-            Value::Func(s) => write!(f, "{:?}", s),
+            Value::Int(s) => write!(f, "{}", s),
+            Value::Real(s) => write!(f, "{}", s),
+            Value::Bool(s) => write!(f, "{}", s),
+            Value::Str(s) => write!(f, "{}", s),
+            Value::Char(s) => write!(f, "{}", s),
+            Value::Func(s) => write!(f, "{}", s),
             _ => write!(f, "display isnt available for this type"),
         }
     }
@@ -94,6 +94,7 @@ pub enum Expr {
     While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
     Input(String, Box<Spanned<Self>>),
+    End,
 }
 
 pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
@@ -524,7 +525,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(declare_arr)
             .or(declare_prim)
             .or(raw_expr)
+            .or(end().map_with_span(|_, span| (Expr::End, span)))
             .labelled("block")
     })
-    .then_ignore(end())
 }

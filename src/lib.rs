@@ -1,7 +1,12 @@
 use std::{
     collections::HashMap,
-    sync::{mpsc::{channel, Receiver, Sender}, Arc, Mutex},
-    thread, io,
+    io,
+    rc::Rc,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, Mutex,
+    },
+    thread, time::Duration,
 };
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
@@ -9,76 +14,54 @@ use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 mod eval;
 mod lexer;
 mod parser;
-mod prelude;
+pub mod prelude;
 mod utils;
 use eval::*;
 use lexer::*;
 use parser::*;
-use prelude::*;
+pub use prelude::*;
 
+#[derive(Clone, Debug)]
 pub enum Actions {
     Output(String),
     Input,
+    End,
+}
+#[derive(Clone)]
+pub struct Interpreter<I, O> {
+    pub input: I,
+    pub output: O,
+    pub reciver: Rc<Receiver<Actions>>,
+    pub sender: Sender<Actions>,
+    pub input_buffer: Arc<Mutex<String>>,
 }
 
-pub struct Interpreter {
-    source: String,
-    input: Box<dyn Fn(&mut Self) -> io::Result<()>>,
-    output: Box<dyn Fn(String)>,
-    reciver: Receiver<Actions>,
-    sender: Sender<Actions>,
-    input_buffer: Arc<Mutex<String>>
-}
-
-impl Default for Interpreter {
-    fn default() -> Self {
+impl<I, O> Interpreter<I, O>
+where
+    I: FnOnce(&mut String) -> Result<(), io::Error> + Clone,
+    O: FnOnce(String) + Clone,
+{
+    pub fn new(input: I, output: O) -> Self {
         let (sender, reciver) = channel();
-        Self {
-            source: "".to_string(),
-            input: Box::new(|interpreter| {
-                let stdin = io::stdin();
-                let mut buf = String::new();
-                stdin.read_line(&mut buf)?;
-                *interpreter.input_buffer.lock().unwrap() = buf;
-                Ok(())
-            }),
-            output: Box::new(|string| {
-                println!("{}", string);
 
-            }),
-            reciver,
+        Self {
+            input,
+            output,
+            reciver: Rc::new(reciver),
             sender,
             input_buffer: Arc::new(Mutex::new("".to_string())),
         }
     }
-}
 
-impl Interpreter {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn set_output(&mut self, func: Box<dyn Fn(String)>) -> &mut Self {
-        self.output = func;
-        self
-    }
-
-    pub fn set_input(&mut self, func: Box<dyn Fn(&mut Self)->io::Result<()>>) -> &mut Self {
-        self.input = func;
-        self
-    }
-
-
-
-    pub fn interpret(&mut self) -> Result<(), Vec<ariadne::Report>> {
+    pub fn interpret(&mut self, code: String) -> Result<(), Vec<ariadne::Report>> {
         if cfg!(debug_assertions) {
-            println!("--- Code INPUT ---\n{}\n", self.source);
+            println!("--- Code INPUT ---\n{}\n", code);
         }
 
-        let (tokens, mut errs) = lexer().parse_recovery(self.source.clone());
+        let (tokens, mut errs) = lexer().parse_recovery(code.clone());
 
         let parse_errs = if let Some(tokens) = tokens {
-            let eoi = 0..self.source.chars().count();
+            let eoi = 0..code.chars().count();
             if cfg!(debug_assertions) {
                 println!("--- Token Trees ---\n{:#?}\n", tokens);
             }
@@ -102,23 +85,40 @@ impl Interpreter {
 
                 let mut ctx = Ctx::new();
                 ctx.types = types;
+                ctx.input = Arc::clone(&self.input_buffer);
                 ctx.channel = self.sender.clone();
-
                 let interpreter = thread::spawn(move || eval(&ast, &mut ctx));
-                for i in &self.reciver {
-                    match i {
-                        Actions::Output(s) => (self.output)(s),
-                        Actions::Input => if let Err(err) = (self.input)(self) {
-                            errs.push(Simple::custom(0..0, err.to_string()))
-                        },
-                        _ => {}
+
+                'top: loop {
+                    match self.reciver.recv_timeout(Duration::from_millis(10)) {
+                        Ok(Actions::Output(s)) => {
+                            (self.output.clone())(s);
+                        }
+                        Ok(Actions::Input) => {
+                            if let Err(err) =
+                                (self.input.clone())(&mut self.input_buffer.lock().unwrap())
+                            {
+                                errs.push(Simple::custom(0..0, err.to_string()));
+                                interpreter.thread().unpark();
+                            } else {
+                                interpreter.thread().unpark();
+                            }
+                        }
+                        Ok(Actions::End) => {
+                            break 'top;
+                        }
+                        e => {
+                            println!("{:?}", e);
+                            break 'top;
+                        }
                     }
                 }
 
-                let response = interpreter.join().unwrap();
+                let response = interpreter.join();
                 match response {
-                    Ok(_) => {},
-                    Err(err) => errs.push(Simple::custom(err.span, err.msg))
+                    Ok(Ok(_)) => {}
+                    Ok(Err(err)) => errs.push(Simple::custom(err.span, err.msg)),
+                    Err(_) => errs.push(Simple::custom(0..0, "Thread panicked".to_string())),
                 }
             }
             parse_errs

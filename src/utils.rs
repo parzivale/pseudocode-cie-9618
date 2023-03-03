@@ -243,7 +243,7 @@ pub fn update_comp_vars(
                 types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
                 local_vars: ctx.local_vars.clone(),
                 channel: ctx.channel.clone(),
-                input: Arc::clone(&ctx.input)
+                input: Arc::clone(&ctx.input),
             };
             let index = eval(index, &mut temp_ctx)?;
             match index {
@@ -358,7 +358,7 @@ pub fn type_check_comp(
             local_vars: ctx.local_vars.clone(),
             types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
             channel: ctx.channel.clone(),
-            input: Arc::clone(&ctx.input)
+            input: Arc::clone(&ctx.input),
         };
 
         let i = eval(i, &mut temp_ctx)?;
