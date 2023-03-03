@@ -485,14 +485,14 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             });
 
         let input = just(Token::Keyword("INPUT".to_string()))
-            .ignore_then(ident.clone())
+            .ignore_then(ident)
             .then(expr.clone().or_not())
             .map_with_span(|(val, body), span: Span| {
                 let body = match body {
                     Some(t) => t,
                     None => (Expr::Value(Value::Null), span.clone()),
                 };
-                (Expr::Input(val, Box::new(body)), span.clone())
+                (Expr::Input(val, Box::new(body)), span)
             });
 
         let declare_comp = just(Token::Keyword("TYPE".to_string()))

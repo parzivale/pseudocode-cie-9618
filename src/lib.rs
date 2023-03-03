@@ -6,10 +6,11 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc, Mutex,
     },
-    thread, time::Duration,
+    thread,
+    time::Duration,
 };
 
-use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
+use ariadne::{Color, Fmt, Label, Report, ReportKind};
 
 mod eval;
 mod lexer;
