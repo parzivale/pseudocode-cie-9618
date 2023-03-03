@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{mpsc::*, Arc, Mutex},
+};
 
 use crate::{
     parser::{ArgMode, BinaryOp, Expr, Value},
@@ -84,6 +87,8 @@ pub struct Ctx {
     pub vars: VarMap,
     pub local_vars: VarMap,
     pub types: TypeMap,
+    pub channel: Sender<Actions>,
+    pub input: Arc<Mutex<String>>
 }
 
 impl Ctx {
@@ -92,6 +97,8 @@ impl Ctx {
             vars: HashMap::new(),
             local_vars: HashMap::new(),
             types: HashMap::new(),
+            channel: channel().0,
+            input: Arc::new(Mutex::new("".to_string()))
         }
     }
 }
@@ -148,6 +155,8 @@ fn comp_var(
                 vars: ctx.vars.clone(),
                 local_vars: h,
                 types: ctx.types.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input)
             };
 
             eval(sub, &mut ctx)?
@@ -561,6 +570,8 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                 local_vars: ctx.local_vars.clone(),
                 types: ctx.types.clone(),
                 vars: HashMap::new(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input)
             };
             eval(items, &mut ctx_temp)?;
             let mut map = HashMap::new();
@@ -661,6 +672,8 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         vars: vars_func,
                         local_vars: ctx.local_vars.clone(),
                         types: ctx.types.clone(),
+                        channel: ctx.channel.clone(),
+                        input: Arc::clone(&ctx.input)
                     };
 
                     let output = eval(&f.body, &mut temp_ctx);
