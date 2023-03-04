@@ -16,12 +16,21 @@ pub struct Func {
     returns: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Builtin {
+    args: Vec<((ArgMode, String), String)>,
+    returns: String,
+}
+
+
+
 #[derive(Debug, Clone)]
 pub enum Types {
     Composite(HashMap<String, String>),
     Enumerated(Vec<String>),
     Array(String, i32, i32),
     Func(Func),
+    Builtin(Builtin),
     Real,
     String,
     Integer,
@@ -36,6 +45,7 @@ impl PartialEq for Types {
             Self::Composite(_) => matches!(other, Self::Composite(_)),
             Self::Enumerated(_) => matches!(other, Self::Enumerated(_)),
             Self::Func(_) => matches!(other, Self::Func(_)),
+            Self::Builtin(_) => matches!(other, Self::Builtin(_)),
             Self::Array(_, _, _) => matches!(other, Self::Array(_, _, _)),
             Self::Real => matches!(other, Self::Real),
             Self::String => matches!(other, Self::String),
@@ -732,6 +742,15 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                             ),
                         });
                     }
+                }
+                Types::Builtin(f) => {
+                    if args.len() != f.args.len() {
+                        return Err(Error{
+                            span: expr.1.clone(),
+                            msg: format!("arg count mismatch between definition and call. Expected {} args got {}", f.args.len(), args.len())
+                        });
+                    }
+                    Value::Null
                 }
                 _ => {
                     return Err(Error {
