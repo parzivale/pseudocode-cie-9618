@@ -21,3 +21,6 @@ To silence the output and only show the program output run with release
 ```bash
 cargo run --release - "example.pseudo"
 ```
+
+## Pseudocode syntax/reference
+Please reference the [[wiki|wiki/Home]]
