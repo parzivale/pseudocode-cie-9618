@@ -1,4 +1,4 @@
-IF TRUE = TRUE
+IF TRUE
     THEN
         OUTPUT "hi"
     ELSE

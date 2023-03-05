@@ -95,7 +95,6 @@ pub enum Expr {
     While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
     Input(String, Box<Spanned<Self>>),
-    End,
 }
 
 pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
@@ -122,35 +121,32 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let ident = select! {Token::Ident(item) => item}.labelled("indentifier");
 
-        let return_ = just(Token::Keyword("RETURN".to_string())).ignore_then(expr.clone());
-
         let type_ = select! { Token::Type(type_) => type_}
             .labelled("type")
             .or(ident);
 
-        let items = expr
-            .clone()
-            .separated_by(just(Token::Ctrl(',')))
-            .allow_trailing()
-            .delimited_by(
-                just(Token::Open(Delim::Paren)),
-                just(Token::Close(Delim::Paren)),
-            );
-
-        let call_function = ident
-            .then(items.clone())
-            .labelled("call")
-            .map(|(f, args)| Expr::Call(f, args));
         let base_expr = recursive(|base_expr| {
+            let items = base_expr
+                .clone()
+                .separated_by(just(Token::Ctrl(',')))
+                .allow_trailing()
+                .delimited_by(
+                    just(Token::Open(Delim::Paren)),
+                    just(Token::Close(Delim::Paren)),
+                );
+
+            let call_function = ident
+                .then(items.clone())
+                .labelled("call")
+                .map(|(f, args)| Expr::Call(f, args));
             let atom = val
-                .or(return_.map(|a| Expr::Return(Box::new(a))))
                 .or(call_function)
                 .or(ident.map_with_span(|ident, span: Span| {
                     Expr::Var(Box::new((Expr::Value(Value::Str(ident)), span)))
                 }))
                 .labelled("atom")
                 .map_with_span(|expr, span| (expr, span))
-                .or(expr.clone().delimited_by(
+                .or(base_expr.clone().delimited_by(
                     just(Token::Open(Delim::Paren)),
                     just(Token::Close(Delim::Paren)),
                 ));
@@ -231,6 +227,15 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let raw_expr = compare;
 
+        let items = raw_expr
+            .clone()
+            .separated_by(just(Token::Ctrl(',')))
+            .allow_trailing()
+            .delimited_by(
+                just(Token::Open(Delim::Paren)),
+                just(Token::Close(Delim::Paren)),
+            );
+
         let block = expr.clone().delimited_by(
             just(Token::Open(Delim::Block)),
             just(Token::Close(Delim::Block)),
@@ -238,7 +243,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let if_ = recursive(|if_| {
             just(Token::Keyword("IF".to_string()))
-                .ignore_then(expr.clone())
+                .ignore_then(raw_expr.clone())
                 .then_ignore(just(Token::Open(Delim::Block)))
                 .then_ignore(just(Token::Keyword("THEN".to_string())))
                 .then(block.clone())
@@ -418,9 +423,9 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .then_ignore(just(Token::Ctrl(':')))
             .then(type_)
             .then_ignore(just(Token::Ctrl('[')))
-            .then(expr.clone())
+            .then(raw_expr.clone())
             .then_ignore(just(Token::Ctrl(':')))
-            .then(expr.clone())
+            .then(raw_expr.clone())
             .then_ignore(just(Token::Ctrl(']')))
             .then_ignore(just(Token::Keyword("OF".to_string())))
             .then(type_)
@@ -454,7 +459,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                     .repeated(),
             )
             .then_ignore(just(Token::Op("<-".to_string())))
-            .then(expr.clone())
+            .then(raw_expr.clone())
             .then(expr.clone().or_not())
             .map_with_span(|(((name, children), v), body), span: Span| {
                 let body = match body {
@@ -475,7 +480,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .labelled("assign");
 
         let output = just(Token::Keyword("OUTPUT".to_string()))
-            .ignore_then(expr.clone().separated_by(just(Token::Ctrl(','))))
+            .ignore_then(raw_expr.clone().separated_by(just(Token::Ctrl(','))))
             .then(expr.clone().or_not())
             .map_with_span(|(val, body), span: Span| {
                 let body = match body {
@@ -515,6 +520,10 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 )
             });
 
+        let return_ = just(Token::Keyword("RETURN".to_string()))
+            .ignore_then(raw_expr.clone())
+            .map_with_span(|a, span| (Expr::Return(Box::new(a)), span));
+
         if_.or(function)
             .or(procedure)
             .or(call_procedure)
@@ -525,8 +534,8 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(declare_comp)
             .or(declare_arr)
             .or(declare_prim)
-            .or(raw_expr)
-            .or(end().map_with_span(|_, span| (Expr::End, span)))
+            .or(return_)
             .labelled("block")
     })
+    .then_ignore(end())
 }

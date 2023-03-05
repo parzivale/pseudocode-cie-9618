@@ -3,7 +3,7 @@ use std::{
     io,
     rc::Rc,
     sync::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
     thread,
@@ -26,7 +26,6 @@ pub use prelude::*;
 pub enum Actions {
     Output(String),
     Input,
-    End,
 }
 #[derive(Clone)]
 pub struct Interpreter<I, O> {
@@ -70,6 +69,25 @@ where
 
             let (ast, parse_errs) = parser().parse_recovery(token_stream);
 
+            let right = Builtin {
+                args: vec!["STRING".to_string(), "INTEGER".to_string()],
+                returns: "STRING".to_string(),
+            };
+
+            let length = Builtin {
+                args: vec!["STRING".to_string()],
+                returns: "INTEGER".to_string(),
+            };
+
+            let mid = Builtin {
+                args: vec![
+                    "STRING".to_string(),
+                    "INTEGER".to_string(),
+                    "INTEGER".to_string(),
+                ],
+                returns: "STRING".to_string(),
+            };
+
             let types = HashMap::from([
                 ("INTEGER".to_string(), Types::Integer),
                 ("REAL".to_string(), Types::Real),
@@ -77,6 +95,9 @@ where
                 ("STRING".to_string(), Types::String),
                 ("CHAR".to_string(), Types::Char),
                 ("NULL".to_string(), Types::Null),
+                ("RIGHT".to_string(), Types::Builtin(right)),
+                ("LENGTH".to_string(), Types::Builtin(length)),
+                ("MID".to_string(), Types::Builtin(mid)),
             ]);
             if let Some(ast) = ast.filter(|_| errs.len() + parse_errs.len() == 0) {
                 if cfg!(debug_assertions) {
@@ -105,13 +126,14 @@ where
                                 interpreter.thread().unpark();
                             }
                         }
-                        Ok(Actions::End) => {
-                            break 'top;
-                        }
+                        Err(RecvTimeoutError::Timeout) => {}
                         e => {
                             println!("{:?}", e);
                             break 'top;
                         }
+                    }
+                    if interpreter.is_finished() {
+                        break 'top;
                     }
                 }
 

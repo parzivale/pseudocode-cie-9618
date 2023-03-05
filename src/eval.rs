@@ -18,11 +18,9 @@ pub struct Func {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Builtin {
-    args: Vec<((ArgMode, String), String)>,
-    returns: String,
+    pub args: Vec<String>,
+    pub returns: String,
 }
-
-
 
 #[derive(Debug, Clone)]
 pub enum Types {
@@ -313,10 +311,6 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
     Ok(match &expr.0 {
         Expr::Error => unreachable!(),
-        Expr::End => {
-            ctx.channel.send(Actions::End).unwrap();
-            Value::Null
-        }
         Expr::Value(val) => val.clone(),
         Expr::Var(name) => var(expr, ctx, name)?,
         Expr::CompVar(name, sub) => comp_var(expr, ctx, name, sub)?,
@@ -619,12 +613,12 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
             eval(expr, ctx)?;
             eval(then, ctx)?
         }
-        Expr::Call(func, args) => {
+        Expr::Call(func_string, args) => {
             //gets the function definition from the type table
             let ctypes = ctx.types.clone();
-            let func = ctypes.get(&func.clone()).ok_or_else(|| Error {
+            let func = ctypes.get(&func_string.clone()).ok_or_else(|| Error {
                 span: expr.1.clone(),
-                msg: format!("function '{}' has not been declared", func),
+                msg: format!("function '{}' has not been declared", func_string),
             })?;
 
             //makes sure what we got back was a function
@@ -750,7 +744,119 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                             msg: format!("arg count mismatch between definition and call. Expected {} args got {}", f.args.len(), args.len())
                         });
                     }
-                    Value::Null
+
+                    let mut vars_func = Vec::new();
+
+                    for (n, i) in args.iter().enumerate() {
+                        // checks if type exsists
+                        let t_def = f
+                            .args
+                            .get(n)
+                            .ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: format!("No arg found at index '{}'", n),
+                            })?
+                            .clone();
+                        let t_type = ctx
+                            .types
+                            .get(&t_def)
+                            .ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: format!("Type '{}' is not declared", t_def),
+                            })?
+                            .clone();
+
+                        let v_type = Types::from(eval(i, ctx)?);
+
+                        //checks if types dont match
+                        if t_type != v_type {
+                            return Err(Error {
+                                span: expr.1.clone(),
+                                msg: format!(
+                                    "Type '{:?}' does not match type '{:?}'",
+                                    t_type, v_type
+                                ),
+                            });
+                        }
+
+                        //store the vars on a local var map
+                        vars_func.push(eval(i, ctx)?);
+                    }
+
+                    match func_string.as_str() {
+                        "RIGHT" => Value::Str(vars_func
+                            .get(0)
+                            .ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: "Builtin 'Right' needs a string to modify".to_string(),
+                            })?
+                            .to_string()
+                            .chars()
+                            .rev()
+                            .collect::<String>()
+                            .get(0..vars_func.get(1).ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: "Builtin 'Right' needs a number of characters to fetch".to_string(),
+                            })?.to_string().parse::<usize>().map_err(|_| Error {
+                                span: expr.1.clone(),
+                                msg: "Index is not an integer".to_string(),}
+                            )?).ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: "Builtin 'Right' needs a string to read".to_string(),
+                            })?
+                            .to_string()
+                            .chars()
+                            .rev()
+                            .collect::<String>()),
+
+                        "LENGTH" => Value::Int(vars_func
+                            .get(0)
+                            .ok_or_else(|| Error {
+                                span: expr.1.clone(),
+                                msg: "Builtin 'LENGTH' needs a string to modify".to_string(),
+                            })?
+                            .to_string()
+                            .len()
+                            .try_into()
+                            .unwrap()),
+
+                        "MID" =>Value::Str(vars_func.get(0).ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: "Builtin 'MID' needs a string to modify".to_string(),
+                        })?
+                        .to_string()[vars_func.get(1)
+                        .ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: "Builtin 'MID' needs an index to start reading from".to_string(),
+                        })?
+                        .to_string()
+                        .parse::<usize>()
+                        .map_err(|_| Error {
+                            span: expr.1.clone(),
+                            msg: "Builtin 'MID' Cannot convert starting index to integer".to_string(),
+                        })?-1
+                        ..
+                        vars_func.get(2)
+                        .ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: "Builtin 'MID' needs an index to stop reading at".to_string(),
+                        })?
+                        .to_string()
+                        .parse::<usize>()
+                        .map_err(|_| Error {
+                            span: expr.1.clone(),
+                            msg: "Builtin 'MID' Cannot convert ending index to integer".to_string(),
+                        })?-1+1]
+                        .to_string()),
+
+                        s => return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!(
+                                "Builtin '{}' has not been defined",
+                                s
+                            ),
+                        })
+                    }
                 }
                 _ => {
                     return Err(Error {
@@ -805,7 +911,7 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
 
             {
                 let string = (*ctx.input.lock().unwrap()).trim().to_string();
-
+                *ctx.input.lock().unwrap() = "".to_string();
                 if ctx.vars.get(var).is_some() {
                     ctx.vars.insert(
                         var.clone(),
@@ -818,6 +924,7 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                     });
                 }
             }
+
             eval(then, ctx)?
         }
         _ => {
