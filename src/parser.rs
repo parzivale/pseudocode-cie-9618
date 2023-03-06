@@ -277,7 +277,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let while_ = recursive(|while_| {
             just(Token::Keyword("WHILE".to_string()))
-                .ignore_then(expr.clone())
+                .ignore_then(raw_expr.clone())
                 .then(block.clone().or(while_))
                 .then_ignore(just(Token::Keyword("ENDWHILE".to_string())))
                 .then(expr.clone().or_not())
