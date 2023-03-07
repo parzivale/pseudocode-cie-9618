@@ -820,7 +820,7 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                             .try_into()
                             .unwrap()),
 
-                        "MID" =>Value::Str(vars_func.get(0).ok_or_else(|| Error {
+                        "MID" => Value::Str(vars_func.get(0).ok_or_else(|| Error {
                             span: expr.1.clone(),
                             msg: "Builtin 'MID' needs a string to modify".to_string(),
                         })?
@@ -886,7 +886,10 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         })?
                         .to_string()
                         .parse::<f32>()
-                        .unwrap()),
+                        .map_err(|_| Error {
+                            span: expr.1.clone(),
+                            msg: "Couldn't convert to real".to_string(),
+                        })?),
 
                         "ASC" => Value::Int(vars_func.get(0).ok_or_else(|| Error {
                             span: expr.1.clone(),
@@ -895,7 +898,10 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         .to_string()
                         .chars()
                         .next()
-                        .unwrap() as i32),
+                        .ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: "Couldn't find the character to convert".to_string(),
+                        })? as i32),
 
                         "MOD" => Value::Int(vars_func.get(0).ok_or_else(|| Error {
                             span: expr.1.clone(),
@@ -903,7 +909,10 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         })?
                         .to_string()
                         .parse::<i32>()
-                        .unwrap()
+                        .map_err(|_| Error {
+                            span: expr.1.clone(),
+                            msg: "Couldn't convert to integer".to_string(),
+                        })?
                         %
                         vars_func.get(1).ok_or_else(|| Error {
                             span: expr.1.clone(),
@@ -911,7 +920,10 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         })?
                         .to_string()
                         .parse::<i32>()
-                        .unwrap()),
+                        .map_err(|_| Error {
+                            span: expr.1.clone(),
+                            msg: "Couldn't convert to integer".to_string(),
+                        })?),
 
                         "INTEGER_TO_STRING" => Value::Str(vars_func.get(0).ok_or_else(|| Error {
                             span: expr.1.clone(),
@@ -931,12 +943,21 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         "STRING_TO_CHAR" => Value::Char(vars_func.get(0).ok_or_else(|| Error {
                             span: expr.1.clone(),
                             msg: "Builtin 'STRING_TO_CHAR' needs a string to convert to char".to_string(),
-                        })?.to_string().chars().next().unwrap()),
+                        })?
+                        .to_string()
+                        .chars()
+                        .next()
+                        .ok_or_else(|| Error {
+                            span: expr.1.clone(),
+                            msg: "Couldn't find the character to convert".to_string(),
+                        })?),
 
                         "STRING_TO_REAL" => Value::Real(vars_func.get(0).ok_or_else(|| Error {
                             span: expr.1.clone(),
                             msg: "Builtin 'STRING_TO_REAL' needs a string to convert to real".to_string(),
-                        })?.to_string().parse::<f32>().map_err(|_| Error {
+                        })?.to_string()
+                        .parse::<f32>()
+                        .map_err(|_| Error {
                             span: expr.1.clone(),
                             msg: "Cannot convert string to real, not a valid real".to_string(),
                         })?),
