@@ -9,3 +9,5 @@ b <- 2.0
 c <- "hi there"
 d <- 'a'
 e <- TRUE
+
+OUTPUT a,b,c,d,e

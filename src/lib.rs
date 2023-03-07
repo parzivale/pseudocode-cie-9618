@@ -3,7 +3,7 @@ use std::{
     io,
     rc::Rc,
     sync::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
     thread,
@@ -26,7 +26,6 @@ pub use prelude::*;
 pub enum Actions {
     Output(String),
     Input,
-    End,
 }
 #[derive(Clone)]
 pub struct Interpreter<I, O> {
@@ -70,6 +69,95 @@ where
 
             let (ast, parse_errs) = parser().parse_recovery(token_stream);
 
+            let right = Builtin {
+                args: vec!["STRING".to_string(), "INTEGER".to_string()],
+                returns: "STRING".to_string(),
+            };
+
+            let length = Builtin {
+                args: vec!["STRING".to_string()],
+                returns: "INTEGER".to_string(),
+            };
+
+            let mid = Builtin {
+                args: vec![
+                    "STRING".to_string(),
+                    "INTEGER".to_string(),
+                    "INTEGER".to_string(),
+                ],
+                returns: "STRING".to_string(),
+            };
+
+            let lcase = Builtin {
+                args: vec!["CHAR".to_string()],
+                returns: "CHAR".to_string(),
+            };
+
+            let ucase = Builtin {
+                args: vec!["CHAR".to_string()],
+                returns: "CHAR".to_string(),
+            };
+
+            let real_to_int = Builtin {
+                args: vec!["REAL".to_string()],
+                returns: "INTEGER".to_string(),
+            };
+
+
+            let int_to_real = Builtin {
+                args: vec!["INTEGER".to_string()],
+                returns: "REAL".to_string(),
+            };
+
+            let asc = Builtin {
+                args: vec!["CHAR".to_string()],
+                returns: "INTEGER".to_string(),
+            };
+
+            let mod_ = Builtin {
+                args: vec!["INTEGER".to_string(), "INTEGER".to_string()],
+                returns: "INTEGER".to_string(),
+            };
+
+            let integer_to_string = Builtin {
+                args: vec!["INTEGER".to_string()],
+                returns: "STRING".to_string(),
+            };
+
+            let real_to_string = Builtin {
+                args: vec!["REAL".to_string()],
+                returns: "STRING".to_string(),
+            };
+
+            let char_to_string = Builtin {
+                args: vec!["CHAR".to_string()],
+                returns: "STRING".to_string(),
+            };
+
+            let string_to_char = Builtin {
+                args: vec!["STRING".to_string()],
+                returns: "CHAR".to_string(),
+            };
+
+            let string_to_real = Builtin {
+                args: vec!["STRING".to_string()],
+                returns: "REAL".to_string(),
+            };
+            let string_to_integer = Builtin {
+                args: vec!["STRING".to_string()],
+                returns: "INTEGER".to_string(),
+            };
+
+            let char_to_integer = Builtin {
+                args: vec!["CHAR".to_string()],
+                returns: "INTEGER".to_string(),
+            };
+
+            let char_to_real = Builtin {
+                args: vec!["CHAR".to_string()],
+                returns: "REAL".to_string(),
+            };
+
             let types = HashMap::from([
                 ("INTEGER".to_string(), Types::Integer),
                 ("REAL".to_string(), Types::Real),
@@ -77,12 +165,41 @@ where
                 ("STRING".to_string(), Types::String),
                 ("CHAR".to_string(), Types::Char),
                 ("NULL".to_string(), Types::Null),
+                ("RIGHT".to_string(), Types::Builtin(right)),
+                ("LENGTH".to_string(), Types::Builtin(length)),
+                ("MID".to_string(), Types::Builtin(mid)),
+                ("LCASE".to_string(), Types::Builtin(lcase)),
+                ("UCASE".to_string(), Types::Builtin(ucase)),
+                ("REAL_TO_INTEGER".to_string(), Types::Builtin(real_to_int)),
+                ("INTEGER_TO_REAL".to_string(), Types::Builtin(int_to_real)),
+                ("ASC".to_string(), Types::Builtin(asc)),
+                ("MOD".to_string(), Types::Builtin(mod_)),
+                (
+                    "INTEGER_TO_STRING".to_string(),
+                    Types::Builtin(integer_to_string),
+                ),
+                ("REAL_TO_STRING".to_string(), Types::Builtin(real_to_string)),
+                ("CHAR_TO_STRING".to_string(), Types::Builtin(char_to_string)),
+                ("STRING_TO_CHAR".to_string(), Types::Builtin(string_to_char)),
+                ("STRING_TO_REAL".to_string(), Types::Builtin(string_to_real)),
+                (
+                    "STRING_TO_INTEGER".to_string(),
+                    Types::Builtin(string_to_integer),
+                ),
+                (
+                    "CHAR_TO_INTEGER".to_string(),
+                    Types::Builtin(char_to_integer),
+                ),
+                (
+                    "CHAR_TO_REAL".to_string(),
+                    Types::Builtin(char_to_real),
+                ),
             ]);
             if let Some(ast) = ast.filter(|_| errs.len() + parse_errs.len() == 0) {
                 if cfg!(debug_assertions) {
                     println!("--- Abstract Syntax Tree ---\n{:#?}\n", ast);
+                    println!("--- OUTPUT ---");
                 }
-                println!("--- OUTPUT ---");
 
                 let mut ctx = Ctx::new();
                 ctx.types = types;
@@ -105,8 +222,10 @@ where
                                 interpreter.thread().unpark();
                             }
                         }
-                        Ok(Actions::End) => {
-                            break 'top;
+                        Err(RecvTimeoutError::Timeout) => {
+                            if interpreter.is_finished() {
+                                break 'top;
+                            }
                         }
                         e => {
                             println!("{:?}", e);

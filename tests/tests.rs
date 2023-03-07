@@ -13,13 +13,18 @@ fn test_primitives() {
         Ok(())
     };
 
+    let output_values = Mutex::new(Vec::new());
     let output = |s: String| {
-        println!("{}", s);
+        output_values.lock().unwrap().push(s);
     };
 
     let mut interpreter = Interpreter::new(input, output);
 
     assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(
+        *output_values.lock().unwrap(),
+        vec!["1 ", "2 ", "hi there ", "a ", "true ", "\n"]
+    );
 }
 
 #[test]
@@ -197,11 +202,84 @@ fn test_array_composite() {
         Ok(())
     };
 
+    let output_values = Mutex::new(Vec::new());
     let output = |s: String| {
-        println!("{}", s);
+        output_values.lock().unwrap().push(s);
     };
 
     let mut interpreter = Interpreter::new(input, output);
 
     assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(*output_values.lock().unwrap(), vec!["1 ", "\n"]);
+}
+
+#[test]
+fn test_byref_byval_procedure() {
+    let code = fs::read_to_string("tests/data/test_byref_byval_procedure.pseudo").unwrap();
+    let input = |s: &mut String| -> Result<(), io::Error> {
+        let stdin = io::stdin();
+        let mut buf = String::new();
+        stdin.read_line(&mut buf)?;
+        *s = buf;
+        Ok(())
+    };
+
+    let output_values = Mutex::new(Vec::new());
+    let output = |s: String| {
+        output_values.lock().unwrap().push(s);
+    };
+
+    let mut interpreter = Interpreter::new(input, output);
+
+    assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(
+        *output_values.lock().unwrap(),
+        vec!["11 ", "\n", "11 ", "\n"]
+    );
+}
+
+#[test]
+fn test_function_primitives() {
+    let code = fs::read_to_string("tests/data/test_function_primitives.pseudo").unwrap();
+    let input = |s: &mut String| -> Result<(), io::Error> {
+        let stdin = io::stdin();
+        let mut buf = String::new();
+        stdin.read_line(&mut buf)?;
+        *s = buf;
+        Ok(())
+    };
+
+    let output_values = Mutex::new(Vec::new());
+    let output = |s: String| {
+        output_values.lock().unwrap().push(s);
+    };
+
+    let mut interpreter = Interpreter::new(input, output);
+
+    assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(*output_values.lock().unwrap(), vec!["2 ", "\n", "2 ", "\n"]);
+}
+
+#[test]
+fn test_builtins() {
+    let code = fs::read_to_string("tests/data/test_builtins.pseudo").unwrap();
+    let input = |s: &mut String| -> Result<(), io::Error> {
+        let stdin = io::stdin();
+        let mut buf = String::new();
+        stdin.read_line(&mut buf)?;
+        *s = buf;
+        Ok(())
+    };
+
+    let output_values = Mutex::new(Vec::new());
+    let output = |s: String| {
+        if !s.trim().is_empty() {
+            output_values.lock().unwrap().push(s);
+        }
+    };
+
+    let mut interpreter = Interpreter::new(input, output);
+
+    assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(*output_values.lock().unwrap(), vec!["ere ", "8 ", "i t ", "a ", "A ", "100 ", "99 ", "97 ", "0 ", "99 ", "100.1 ", "a ", "e ", "10.1 ", "15 ", "1 ", "2 "]);
 }

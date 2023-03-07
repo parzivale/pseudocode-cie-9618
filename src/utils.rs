@@ -50,7 +50,7 @@ pub fn comp_fill(
                     let mut temp = HashMap::new();
                     match types.get(t) {
                         Some(Types::Composite(h)) => {
-                            for i in *s..*e {
+                            for i in *s..(*e + 1) {
                                 temp.insert(
                                     i.to_string(),
                                     (
@@ -69,7 +69,7 @@ pub fn comp_fill(
                         Some(Types::Array(t, s, e)) => {
                             match types.get(t) {
                                 Some(Types::Composite(h)) => {
-                                    for i in *s..*e {
+                                    for i in *s..(*e + 1) {
                                         temp.insert(
                                             i.to_string(),
                                             (
@@ -87,11 +87,11 @@ pub fn comp_fill(
                                 }
                                 Some(Types::Array(t, s, e)) => {
                                     let mut h = HashMap::new();
-                                    for i in *s..*e {
+                                    for i in *s..(*e + 1) {
                                         h.insert(i.to_string(), t.clone());
                                     }
 
-                                    for i in *s..*e {
+                                    for i in *s..(*e + 1) {
                                         temp.insert(
                                             i.to_string(),
                                             (
@@ -108,7 +108,7 @@ pub fn comp_fill(
                                     }
                                 }
                                 _ => {
-                                    for i in *s..*e {
+                                    for i in *s..(*e + 1) {
                                         temp.insert(i.to_string(), (t.clone(), None::<Value>));
                                     }
                                     temp.insert(last.clone(), (t.clone(), Some(rhs.clone())));
@@ -116,7 +116,7 @@ pub fn comp_fill(
                             };
                         }
                         _ => {
-                            for i in *s..*e {
+                            for i in *s..(*e + 1) {
                                 temp.insert(i.to_string(), (t.clone(), None::<Value>));
                             }
                             temp.insert(last.clone(), (t.clone(), Some(rhs.clone())));

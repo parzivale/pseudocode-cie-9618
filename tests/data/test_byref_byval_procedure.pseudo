@@ -1,0 +1,23 @@
+PROCEDURE lmao(BYREF a:INTEGER)
+    a <- a + 1
+ENDPROCEDURE
+
+DECLARE i:INTEGER
+i <- 10
+
+CALL lmao(i)
+OUTPUT i
+
+TYPE a
+    DECLARE i:INTEGER
+ENDTYPE
+
+PROCEDURE lmao2(BYREF a:a)
+    a.i <- a.i + 1
+ENDPROCEDURE
+
+DECLARE m:a
+m.i <- 10
+
+CALL lmao2(m)
+OUTPUT m.i

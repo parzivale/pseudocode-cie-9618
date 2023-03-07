@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let output = |s: String| {
-        println!("{}", s);
+        print!("{}", s);
     };
 
     let mut interpreter = Interpreter::new(input, output);
