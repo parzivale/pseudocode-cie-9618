@@ -102,7 +102,7 @@ pub enum Expr {
     ),
     While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
-    Input(String, Box<Spanned<Self>>),
+    Input(Box<Spanned<Self>>, Vec<Spanned<Self>>, Box<Spanned<Self>>),
 }
 
 pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
@@ -510,13 +510,30 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
 
         let input = just(Token::Keyword("INPUT".to_string()))
             .ignore_then(ident)
+            .then(
+                just(Token::Ctrl('.'))
+                    .ignore_then(
+                        ident.map_with_span(|ident, span| (Expr::Value(Value::Str(ident)), span)),
+                    )
+                    .or(raw_expr
+                        .clone()
+                        .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))))
+                    .repeated(),
+            )
             .then(expr.clone().or_not())
-            .map_with_span(|(val, body), span: Span| {
+            .map_with_span(|((name, children), body), span: Span| {
                 let body = match body {
                     Some(t) => t,
                     None => (Expr::Value(Value::Null), span.clone()),
                 };
-                (Expr::Input(val, Box::new(body)), span)
+                (
+                    Expr::Input(
+                        Box::new((Expr::Value(Value::Str(name)), span.clone())),
+                        children,
+                        Box::new(body),
+                    ),
+                    span,
+                )
             });
 
         let declare_comp = just(Token::Keyword("TYPE".to_string()))

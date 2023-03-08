@@ -1105,27 +1105,24 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
 
             eval(then, ctx)?
         }
-        Expr::Input(var, then) => {
+        Expr::Input(name, children, then) => {
+            let name_string = eval(name, ctx)?.to_string();
             ctx.channel.send(Actions::Input).unwrap();
             thread::park();
 
             {
                 let string = (*ctx.input.lock().unwrap()).trim().to_string();
                 *ctx.input.lock().unwrap() = "".to_string();
-                if ctx.vars.get(var).is_some() {
-                    ctx.vars.insert(
-                        var.clone(),
-                        ("STRING".to_string(), Some(Value::Str(string))),
-                    );
+                if ctx.vars.get(&name_string).is_some() {
+                    let rhs = (Expr::Value(Value::Str(string)), expr.1.clone());
+                    assign(expr, ctx, name, children, &rhs, then)?
                 } else {
                     return Err(Error {
                         span: expr.1.clone(),
-                        msg: format!("Var '{}' has not been declared", var),
+                        msg: format!("Var '{}' has not been declared", name_string),
                     });
                 }
             }
-
-            eval(then, ctx)?
         }
         _ => {
             todo!()
