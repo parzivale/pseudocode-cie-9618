@@ -281,5 +281,11 @@ fn test_builtins() {
     let mut interpreter = Interpreter::new(input, output);
 
     assert!(interpreter.interpret(code).is_ok());
-    assert_eq!(*output_values.lock().unwrap(), vec!["ere ", "8 ", "i t ", "a ", "A ", "100 ", "99 ", "97 ", "0 ", "99 ", "100.1 ", "a ", "e ", "10.1 ", "15 ", "1 ", "2 "]);
+    assert_eq!(
+        *output_values.lock().unwrap(),
+        vec![
+            "ere ", "8 ", "i t ", "a ", "A ", "100 ", "99 ", "97 ", "0 ", "99 ", "100.1 ", "a ",
+            "e ", "10.1 ", "15 ", "1 ", "2 "
+        ]
+    );
 }

@@ -102,6 +102,7 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
             "FALSE" => Token::Bool(false),
             "FOR" => Token::Keyword("FOR".into()),
             "TO" => Token::Keyword("TO".into()),
+            "STEP" => Token::Keyword("STEP".into()),
             "NEXT" => Token::Keyword("NEXT".into()),
             "WHILE" => Token::Keyword("WHILE".into()),
             "ENDWHILE" => Token::Keyword("ENDWHILE".into()),

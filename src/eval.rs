@@ -548,6 +548,25 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                 _ => unreachable!(),
             }
         }
+        Expr::Binary(a, BinaryOp::Concat, b) => {
+            let a = eval(a, ctx)?;
+            let b = eval(b, ctx)?;
+
+            match a {
+                Value::Str(mut a) => {
+                    if let Value::Str(b) = b {
+                        a.push_str(b.as_str());
+                        Value::Str(a)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot concatenate '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
         Expr::Output(val, then) => {
             for i in val {
                 let out = eval(i, ctx)?;
@@ -1035,6 +1054,49 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
         }
         Expr::While(cond, body, then) => {
             while eval(cond, ctx)? == Value::Bool(true) {
+                match eval(body, ctx)? {
+                    Value::Return(t) => return Ok(Value::Return(t)),
+                    v => v,
+                };
+            }
+
+            eval(then, ctx)?
+        }
+        Expr::For(start_expr, end, step, body, var, then) => {
+            eval(start_expr, ctx)?;
+            let start = match eval(var, ctx)? {
+                Value::Int(i) => i,
+                v => {
+                    println!("{:?}", v);
+                    unreachable!()
+                }
+            };
+            let end = match eval(end, ctx)? {
+                Value::Int(i) => i,
+                v => {
+                    println!("{:?}", v);
+                    unreachable!()
+                }
+            };
+
+            let step = match eval(step, ctx)? {
+                Value::Int(i) => i,
+                v => {
+                    println!("{:?}", v);
+                    unreachable!()
+                }
+            };
+
+            for i in ((start)..(end + 1)).step_by(step as usize) {
+                let rhs = (Expr::Value(Value::Int(i)), start_expr.clone().1);
+
+                match &**start_expr {
+                    (Expr::Assign(name, children, _, then), _) => {
+                        assign(expr, ctx, &*name, &children, &rhs, &*then)?
+                    }
+                    _ => unreachable!(),
+                };
+
                 match eval(body, ctx)? {
                     Value::Return(t) => return Ok(Value::Return(t)),
                     v => v,

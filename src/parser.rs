@@ -46,6 +46,7 @@ pub enum BinaryOp {
     Leq,
     Ge,
     Geq,
+    Concat,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArgMode {
@@ -91,7 +92,14 @@ pub enum Expr {
         Box<Spanned<Self>>,
         Box<Spanned<Self>>,
     ),
-    For(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
+    For(
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+    ),
     While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
     Input(String, Box<Spanned<Self>>),
@@ -181,30 +189,40 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                         span,
                     )
                 });
+            let op = just(Token::Op("&".to_string()))
+                .to(BinaryOp::Concat)
+                .labelled("binop_mult");
+            let concat = index.clone().then(op.then(index.clone()).repeated()).foldl(
+                |a: (Expr, Range<usize>), (op, b): (BinaryOp, (Expr, Range<usize>))| {
+                    let span = a.1.start..b.1.end;
+                    (Expr::Binary(Box::new(a), op, Box::new(b)), span)
+                },
+            );
+
             let op = just(Token::Op("*".to_string()))
                 .to(BinaryOp::Mul)
                 .or(just(Token::Op("/".to_string())).to(BinaryOp::Div))
                 .labelled("binop_mult");
-            let product =
-                index
-                    .clone()
-                    .then(op.then(index.clone()).repeated())
-                    .foldl(|a, (op, b)| {
+            let product = concat
+                .clone()
+                .then(op.then(concat.clone()).repeated())
+                .foldl(
+                    |a: (Expr, Range<usize>), (op, b): (BinaryOp, (Expr, Range<usize>))| {
                         let span = a.1.start..b.1.end;
                         (Expr::Binary(Box::new(a), op, Box::new(b)), span)
-                    });
+                    },
+                );
 
             let op = just(Token::Op("+".to_string()))
                 .to(BinaryOp::Add)
                 .or(just(Token::Op("-".to_string())).to(BinaryOp::Sub))
                 .labelled("binop_addition");
-            product
-                .clone()
-                .then(op.then(product).repeated())
-                .foldl(|a, (op, b)| {
+            product.clone().then(op.then(product).repeated()).foldl(
+                |a: (Expr, Range<usize>), (op, b): (BinaryOp, (Expr, Range<usize>))| {
                     let span = a.1.start..b.1.end;
                     (Expr::Binary(Box::new(a), op, Box::new(b)), span)
-                })
+                },
+            )
         });
 
         let op = just(Token::Op("=".to_string()))
@@ -524,10 +542,46 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .ignore_then(raw_expr.clone())
             .map_with_span(|a, span| (Expr::Return(Box::new(a)), span));
 
+        let for_ = recursive(|for_| {
+            just(Token::Keyword("FOR".to_string()))
+                .ignore_then(assign.clone())
+                .then_ignore(just(Token::Keyword("TO".to_string())))
+                .then(raw_expr.clone())
+                .then(
+                    just(Token::Keyword("STEP".to_string()))
+                        .ignore_then(raw_expr.clone())
+                        .or_not(),
+                )
+                .then(block.clone().or(for_))
+                .then_ignore(just(Token::Keyword("NEXT".to_string())))
+                .then(raw_expr.clone())
+                .then(expr.clone().or_not())
+                .map_with_span(|(((((start, end), step), body), var), then), span: Span| {
+                    (
+                        Expr::For(
+                            Box::new(start),
+                            Box::new(end),
+                            Box::new(match step {
+                                Some(t) => t,
+                                None => (Expr::Value(Value::Int(1)), span.clone()),
+                            }),
+                            Box::new(body),
+                            Box::new(var),
+                            Box::new(match then {
+                                Some(t) => t,
+                                None => (Expr::Value(Value::Null), span.clone()),
+                            }),
+                        ),
+                        span,
+                    )
+                })
+        });
+
         if_.or(function)
             .or(procedure)
             .or(call_procedure)
             .or(while_)
+            .or(for_)
             .or(assign)
             .or(output)
             .or(input)
