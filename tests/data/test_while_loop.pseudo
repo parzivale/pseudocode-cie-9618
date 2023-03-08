@@ -1,0 +1,8 @@
+DECLARE i:INTEGER
+
+i <- 1
+
+WHILE i < 10
+    i <- i + 1
+    OUTPUT i
+ENDWHILE
