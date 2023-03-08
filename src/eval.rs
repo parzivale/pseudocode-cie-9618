@@ -1092,7 +1092,7 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
 
                 match &**start_expr {
                     (Expr::Assign(name, children, _, then), _) => {
-                        assign(expr, ctx, &*name, &children, &rhs, &*then)?
+                        assign(expr, ctx, name, children, &rhs, then)?
                     }
                     _ => unreachable!(),
                 };

@@ -19,7 +19,7 @@ fn main() {
 
     if let Err(e) = interpreter.interpret(code.clone()) {
         for i in e {
-            i.eprint(Source::from(&code));
+            i.eprint(Source::from(&code)).unwrap();
         }
     }
 }
