@@ -91,7 +91,6 @@ impl From<Value> for Types {
         }
     }
 }
-
 #[derive(Debug)]
 pub struct Error {
     pub span: Span,
@@ -322,6 +321,338 @@ fn assign(
     eval(then, ctx)
 }
 
+fn bin_add(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Int(a + b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot add {} to {} due to confilcting types", a, b),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Real(a + b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot add {} to {} due to confilcting types", a, b),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_mul(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Int(a * b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("cannot mutliply {} to {} due to confilcting types", a, b),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Real(a * b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("cannot mutliply {} to {} due to confilcting types", a, b),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_sub(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Int(a - b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("cannot subtract {} from {} due to confilcting types", b, a),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Real(a - b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("cannot subtract {} from {} due to confilcting types", b, a),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_div(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Real(a as f32 / b as f32))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("cannot divide {} dy {} due to confilcting types", b, a),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Real(a / b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("cannot divide {} by {} due to confilcting types", b, a),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_ge(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Bool(a > b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Bool(a > b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_geq(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Bool(a >= b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Bool(a >= b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_le(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Bool(a < b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Bool(a < b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_leq(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Int(a) => {
+            if let Value::Int(b) = b {
+                Ok(Value::Bool(a <= b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        Value::Real(a) => {
+            if let Value::Real(b) = b {
+                Ok(Value::Bool(a <= b))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot compare '{}' to '{}'", b, a),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn bin_concat(
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let a = eval(a, ctx)?;
+    let b = eval(b, ctx)?;
+
+    match a {
+        Value::Str(mut a) => {
+            if let Value::Str(b) = b {
+                a.push_str(b.as_str());
+                Ok(Value::Str(a))
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Cannot concatenate '{}' to '{}'", b, a),
+                })
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn output(val: &Vec<Spanned<Expr>>, then: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
+    for i in val {
+        let out = eval(i, ctx)?;
+        ctx.channel
+            .send(Actions::Output(format!("{out} ")))
+            .unwrap();
+    }
+    ctx.channel.send(Actions::Output("\n".to_string())).unwrap();
+    eval(then, ctx)
+}
+
+fn if_(
+    cond: &Spanned<Expr>,
+    a: &Spanned<Expr>,
+    b: &Spanned<Expr>,
+    body: &Spanned<Expr>,
+    ctx: &mut Ctx,
+) -> Result<Value, Error> {
+    let c = eval(cond, ctx)?;
+    match c {
+        Value::Bool(true) => match eval(a, ctx)? {
+            Value::Return(t) => Ok(Value::Return(t)),
+            _ => eval(body, ctx),
+        },
+        Value::Bool(false) => match eval(b, ctx)? {
+            Value::Return(t) => Ok(Value::Return(t)),
+            _ => eval(body, ctx),
+        },
+        c => Err(Error {
+            span: cond.1.clone(),
+            msg: format!("Conditions must be booleans, found '{:?}'", c),
+        }),
+    }
+}
+
 #[allow(unreachable_patterns)]
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
@@ -332,286 +663,19 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
         Expr::CompVar(name, sub) => comp_var(expr, ctx, name, sub)?,
         Expr::DeclarePrim(name, type_, then) => declare_prim(ctx, name, type_, then)?,
         Expr::Assign(name, children, rhs, then) => assign(expr, ctx, name, children, rhs, then)?,
-        Expr::Binary(a, BinaryOp::Add, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Int(a + b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot add {} to {} due to confilcting types", a, b),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Real(a + b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot add {} to {} due to confilcting types", a, b),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
+        Expr::Binary(a, BinaryOp::Add, b) => bin_add(a, b, ctx, expr)?,
         Expr::Binary(a, BinaryOp::Eq, b) => Value::Bool(eval(a, ctx)? == eval(b, ctx)?),
         Expr::Binary(a, BinaryOp::NotEq, b) => Value::Bool(eval(a, ctx)? != eval(b, ctx)?),
-        Expr::Binary(a, BinaryOp::Mul, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Int(a * b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("cannot mutliply {} to {} due to confilcting types", a, b),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Real(a * b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("cannot mutliply {} to {} due to confilcting types", a, b),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Binary(a, BinaryOp::Sub, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Int(a - b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!(
-                                "cannot subtract {} from {} due to confilcting types",
-                                b, a
-                            ),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Real(a - b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!(
-                                "cannot subtract {} from {} due to confilcting types",
-                                b, a
-                            ),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Binary(a, BinaryOp::Div, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Real(a as f32 / b as f32)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("cannot divide {} dy {} due to confilcting types", b, a),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Real(a / b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("cannot divide {} by {} due to confilcting types", b, a),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Binary(a, BinaryOp::Ge, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Bool(a > b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Bool(a > b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Binary(a, BinaryOp::Geq, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Bool(a >= b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Bool(a >= b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Binary(a, BinaryOp::Le, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Bool(a < b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Bool(a < b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Binary(a, BinaryOp::Leq, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Int(a) => {
-                    if let Value::Int(b) = b {
-                        Value::Bool(a <= b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                Value::Real(a) => {
-                    if let Value::Real(b) = b {
-                        Value::Bool(a <= b)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot compare '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Binary(a, BinaryOp::Concat, b) => {
-            let a = eval(a, ctx)?;
-            let b = eval(b, ctx)?;
-
-            match a {
-                Value::Str(mut a) => {
-                    if let Value::Str(b) = b {
-                        a.push_str(b.as_str());
-                        Value::Str(a)
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!("Cannot concatenate '{}' to '{}'", b, a),
-                        });
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-        Expr::Output(val, then) => {
-            for i in val {
-                let out = eval(i, ctx)?;
-                ctx.channel
-                    .send(Actions::Output(format!("{out} ")))
-                    .unwrap();
-            }
-            ctx.channel.send(Actions::Output("\n".to_string())).unwrap();
-            eval(then, ctx)?
-        }
-        Expr::If(cond, a, b, body) => {
-            let c = eval(cond, ctx)?;
-            match c {
-                Value::Bool(true) => match eval(a, ctx)? {
-                    Value::Return(t) => return Ok(Value::Return(t)),
-                    _ => return eval(body, ctx),
-                },
-                Value::Bool(false) => match eval(b, ctx)? {
-                    Value::Return(t) => return Ok(Value::Return(t)),
-                    _ => return eval(body, ctx),
-                },
-                c => {
-                    return Err(Error {
-                        span: (**cond).1.clone(),
-                        msg: format!("Conditions must be booleans, found '{:?}'", c),
-                    })
-                }
-            }
-        }
+        Expr::Binary(a, BinaryOp::Mul, b) => bin_mul(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Sub, b) => bin_sub(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Div, b) => bin_div(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Ge, b) => bin_ge(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Geq, b) => bin_geq(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Le, b) => bin_le(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Leq, b) => bin_leq(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Concat, b) => bin_concat(a, b, ctx, expr)?,
+        Expr::Output(val, then) => output(val, then, ctx)?,
+        Expr::If(cond, a, b, body) => if_(cond, a, b, body, ctx)?,
         Expr::DeclareComp(name, items, body) => {
             let mut ctx_temp = Ctx {
                 local_vars: ctx.local_vars.clone(),
