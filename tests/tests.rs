@@ -281,5 +281,65 @@ fn test_builtins() {
     let mut interpreter = Interpreter::new(input, output);
 
     assert!(interpreter.interpret(code).is_ok());
-    assert_eq!(*output_values.lock().unwrap(), vec!["ere ", "8 ", "i t ", "a ", "A ", "100 ", "99 ", "97 ", "0 ", "99 ", "100.1 ", "a ", "e ", "10.1 ", "15 ", "1 ", "2 "]);
+    assert_eq!(
+        *output_values.lock().unwrap(),
+        vec![
+            "ere ", "8 ", "i t ", "a ", "A ", "100 ", "99 ", "97 ", "0 ", "99 ", "100.1 ", "a ",
+            "e ", "10.1 ", "15 ", "1 ", "2 "
+        ]
+    );
+}
+
+#[test]
+fn test_while_loop() {
+    let code = fs::read_to_string("tests/data/test_while_loop.pseudo").unwrap();
+    let input = |s: &mut String| -> Result<(), io::Error> {
+        let stdin = io::stdin();
+        let mut buf = String::new();
+        stdin.read_line(&mut buf)?;
+        *s = buf;
+        Ok(())
+    };
+
+    let output_values = Mutex::new(Vec::new());
+    let output = |s: String| {
+        if !s.trim().is_empty() {
+            output_values.lock().unwrap().push(s);
+        }
+    };
+
+    let mut interpreter = Interpreter::new(input, output);
+
+    assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(
+        *output_values.lock().unwrap(),
+        vec!["2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 ", "10 "]
+    );
+}
+
+#[test]
+fn test_for_loop() {
+    let code = fs::read_to_string("tests/data/test_for_loop.pseudo").unwrap();
+    let input = |s: &mut String| -> Result<(), io::Error> {
+        let stdin = io::stdin();
+        let mut buf = String::new();
+        stdin.read_line(&mut buf)?;
+        *s = buf;
+        Ok(())
+    };
+
+    let output_values = Mutex::new(Vec::new());
+    let output = |s: String| {
+        if !s.trim().is_empty() {
+            output_values.lock().unwrap().push(s);
+        }
+    };
+
+    let mut interpreter = Interpreter::new(input, output);
+
+    assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(
+        *output_values.lock().unwrap(),
+        vec!["1 ", "2 ", "3 ", "4 ", "5 ", "6 ", "7 ", "8 ", "9 ", "10 "]
+    );
 }

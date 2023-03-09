@@ -103,7 +103,6 @@ where
                 returns: "INTEGER".to_string(),
             };
 
-
             let int_to_real = Builtin {
                 args: vec!["INTEGER".to_string()],
                 returns: "REAL".to_string(),
@@ -190,10 +189,7 @@ where
                     "CHAR_TO_INTEGER".to_string(),
                     Types::Builtin(char_to_integer),
                 ),
-                (
-                    "CHAR_TO_REAL".to_string(),
-                    Types::Builtin(char_to_real),
-                ),
+                ("CHAR_TO_REAL".to_string(), Types::Builtin(char_to_real)),
             ]);
             if let Some(ast) = ast.filter(|_| errs.len() + parse_errs.len() == 0) {
                 if cfg!(debug_assertions) {

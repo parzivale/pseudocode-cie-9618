@@ -40,7 +40,10 @@ pub enum Types {
 impl PartialEq for Types {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            Self::Composite(_) => matches!(other, Self::Composite(_)),
+            Self::Composite(h) => match other {
+                Types::Composite(h_2) => h == h_2,
+                _ => false,
+            },
             Self::Enumerated(_) => matches!(other, Self::Enumerated(_)),
             Self::Func(_) => matches!(other, Self::Func(_)),
             Self::Builtin(_) => matches!(other, Self::Builtin(_)),
@@ -77,7 +80,13 @@ impl From<Value> for Types {
             Value::Str(_) => Self::String,
             Value::Real(_) => Self::Real,
             Value::Int(_) => Self::Integer,
-            Value::Comp(_) => Self::Composite(HashMap::new()),
+            Value::Comp(h) => {
+                let mut typemap = HashMap::new();
+                for (name, (type_, _)) in h {
+                    typemap.insert(name, type_);
+                }
+                Self::Composite(typemap)
+            }
             _ => Self::Null,
         }
     }
@@ -542,6 +551,25 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
                         return Err(Error {
                             span: expr.1.clone(),
                             msg: format!("Cannot compare '{}' to '{}'", b, a),
+                        });
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        Expr::Binary(a, BinaryOp::Concat, b) => {
+            let a = eval(a, ctx)?;
+            let b = eval(b, ctx)?;
+
+            match a {
+                Value::Str(mut a) => {
+                    if let Value::Str(b) = b {
+                        a.push_str(b.as_str());
+                        Value::Str(a)
+                    } else {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("Cannot concatenate '{}' to '{}'", b, a),
                         });
                     }
                 }
@@ -1043,27 +1071,67 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
 
             eval(then, ctx)?
         }
-        Expr::Input(var, then) => {
+        Expr::For(start_expr, end, step, body, var, then) => {
+            eval(start_expr, ctx)?;
+            let start = match eval(var, ctx)? {
+                Value::Int(i) => i,
+                v => {
+                    println!("{:?}", v);
+                    unreachable!()
+                }
+            };
+            let end = match eval(end, ctx)? {
+                Value::Int(i) => i,
+                v => {
+                    println!("{:?}", v);
+                    unreachable!()
+                }
+            };
+
+            let step = match eval(step, ctx)? {
+                Value::Int(i) => i,
+                v => {
+                    println!("{:?}", v);
+                    unreachable!()
+                }
+            };
+
+            for i in ((start)..(end + 1)).step_by(step as usize) {
+                let rhs = (Expr::Value(Value::Int(i)), start_expr.clone().1);
+
+                match &**start_expr {
+                    (Expr::Assign(name, children, _, then), _) => {
+                        assign(expr, ctx, name, children, &rhs, then)?
+                    }
+                    _ => unreachable!(),
+                };
+
+                match eval(body, ctx)? {
+                    Value::Return(t) => return Ok(Value::Return(t)),
+                    v => v,
+                };
+            }
+
+            eval(then, ctx)?
+        }
+        Expr::Input(name, children, then) => {
+            let name_string = eval(name, ctx)?.to_string();
             ctx.channel.send(Actions::Input).unwrap();
             thread::park();
 
             {
                 let string = (*ctx.input.lock().unwrap()).trim().to_string();
                 *ctx.input.lock().unwrap() = "".to_string();
-                if ctx.vars.get(var).is_some() {
-                    ctx.vars.insert(
-                        var.clone(),
-                        ("STRING".to_string(), Some(Value::Str(string))),
-                    );
+                if ctx.vars.get(&name_string).is_some() {
+                    let rhs = (Expr::Value(Value::Str(string)), expr.1.clone());
+                    assign(expr, ctx, name, children, &rhs, then)?
                 } else {
                     return Err(Error {
                         span: expr.1.clone(),
-                        msg: format!("Var '{}' has not been declared", var),
+                        msg: format!("Var '{}' has not been declared", name_string),
                     });
                 }
             }
-
-            eval(then, ctx)?
         }
         _ => {
             todo!()
