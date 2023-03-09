@@ -40,13 +40,9 @@ pub enum Types {
 impl PartialEq for Types {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            Self::Composite(h) => {
-                match other {
-                    Types::Composite(h_2) => {
-                        h == h_2
-                    }
-                    _ => false
-                }
+            Self::Composite(h) => match other {
+                Types::Composite(h_2) => h == h_2,
+                _ => false,
             },
             Self::Enumerated(_) => matches!(other, Self::Enumerated(_)),
             Self::Func(_) => matches!(other, Self::Func(_)),
@@ -86,11 +82,11 @@ impl From<Value> for Types {
             Value::Int(_) => Self::Integer,
             Value::Comp(h) => {
                 let mut typemap = HashMap::new();
-                for (name, (type_,_)) in h {
+                for (name, (type_, _)) in h {
                     typemap.insert(name, type_);
                 }
                 Self::Composite(typemap)
-            },
+            }
             _ => Self::Null,
         }
     }
