@@ -16,7 +16,7 @@ pub struct Func {
     returns: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Builtin {
     pub args: Vec<String>,
     pub returns: String,
@@ -118,6 +118,12 @@ impl Ctx {
             channel: channel().0,
             input: Arc::new(Mutex::new("".to_string())),
         }
+    }
+}
+
+impl Default for Ctx {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -316,6 +322,7 @@ fn assign(
     eval(then, ctx)
 }
 
+#[allow(unreachable_patterns)]
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
     Ok(match &expr.0 {
