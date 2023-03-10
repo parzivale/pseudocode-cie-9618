@@ -18,7 +18,6 @@ mod lexer;
 mod parser;
 pub mod prelude;
 mod utils;
-use bin_ops::*;
 use eval::*;
 use lexer::*;
 use parser::*;
