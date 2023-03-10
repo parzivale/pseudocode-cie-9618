@@ -12,11 +12,13 @@ use std::{
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind};
 
+mod bin_ops;
 mod eval;
 mod lexer;
 mod parser;
 pub mod prelude;
 mod utils;
+use bin_ops::*;
 use eval::*;
 use lexer::*;
 use parser::*;
