@@ -55,6 +55,8 @@ where
     }
 
     pub fn interpret(&mut self, code: String) -> Result<(), Vec<ariadne::Report>> {
+        let code = code.lines().filter(|line| !line.is_empty()).map(|line| format!("{}\n", line)).collect::<String>();
+
         if cfg!(debug_assertions) {
             println!("--- Code INPUT ---\n{}\n", code);
         }
