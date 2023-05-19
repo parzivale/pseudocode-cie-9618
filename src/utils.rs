@@ -96,7 +96,7 @@ pub fn comp_fill(
                                             i.to_string(),
                                             (
                                                 t.clone(),
-                                                Some(Value::Comp(comp_fill(
+                                                Some(Value::Arr(comp_fill(
                                                     h.clone(),
                                                     &mut types.clone(),
                                                     rhs.clone(),
@@ -122,7 +122,7 @@ pub fn comp_fill(
                             temp.insert(last.clone(), (t.clone(), Some(rhs.clone())));
                         }
                     }
-                    temp_types.insert(i.0.clone(), (i.1.clone(), Some(Value::Comp(temp))));
+                    temp_types.insert(i.0.clone(), (i.1.clone(), Some(Value::Arr(temp))));
                 }
                 _ => {
                     if i.0.clone() == last {
@@ -209,7 +209,7 @@ pub fn update_comp_vars(
                 },
                 Value::Int(i) => match current_var.clone() {
                     // check if child is a array
-                    Value::Comp(h) => {
+                    Value::Arr(h) => {
                         maps.push(current_var);
                         current_var = match h
                             .get(&i.to_string())
@@ -308,8 +308,23 @@ pub fn update_comp_vars(
     // this section might be more apt in declare prim but for now this is
     // the best place for it
     } else if let Value::Comp(h) = rhs {
-        ctx.vars
-            .insert(name.clone(), (type_str_, Some(Value::Comp(h))));
+        let type_ = ctx.types.get(&type_str_).ok_or(Error {
+            span: expr.1.clone(),
+            msg: "Cannot find type associated with composite type (Create empty composite)"
+                .to_string(),
+        })?;
+        match type_ {
+            Types::Composite(_) => Ok(ctx
+                .vars
+                .insert(name.clone(), (type_str_, Some(Value::Comp(h))))),
+            Types::Array(_, _, _) => Ok(ctx
+                .vars
+                .insert(name.clone(), (type_str_, Some(Value::Arr(h))))),
+            _ => Err(Error {
+                span: expr.1.clone(),
+                msg: "Got non composite type (Create empty composite)".to_string(),
+            }),
+        }?;
     } else {
         let last = children.last().ok_or_else(|| Error {
             span: expr.1.clone(),
@@ -325,19 +340,37 @@ pub fn update_comp_vars(
                 })
             }
         };
-        ctx.vars.insert(
-            name.clone(),
-            (
-                type_str_,
-                Some(Value::Comp(comp_fill(
-                    h,
-                    &mut ctx.types.clone(),
-                    rhs,
-                    &expr.clone(),
-                    last,
-                )?)),
+
+        let type_ = ctx.types.get(&type_str_).unwrap();
+        match type_ {
+            Types::Composite(_) => ctx.vars.insert(
+                name.clone(),
+                (
+                    type_str_,
+                    Some(Value::Comp(comp_fill(
+                        h,
+                        &mut ctx.types.clone(),
+                        rhs,
+                        &expr.clone(),
+                        last,
+                    )?)),
+                ),
             ),
-        );
+            Types::Array(_, _, _) => ctx.vars.insert(
+                name.clone(),
+                (
+                    type_str_,
+                    Some(Value::Arr(comp_fill(
+                        h,
+                        &mut ctx.types.clone(),
+                        rhs,
+                        &expr.clone(),
+                        last,
+                    )?)),
+                ),
+            ),
+            _ => panic!(),
+        };
     }
     Ok(())
 }

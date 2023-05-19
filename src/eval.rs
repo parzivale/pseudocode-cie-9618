@@ -138,16 +138,15 @@ fn var(expr: &Spanned<Expr>, ctx: &mut Ctx, name: &Spanned<Expr>) -> Result<Valu
             })
         }
     };
-    //println!("vars:{:?}\nname:{:?}\ntypes:{:?}", vars, name, types);
+    //println!("vars:{:?}\nname:{:?}\ntypes:{:?}", ctx.vars, name, ctx.types);
 
     let v = ctx
-        .local_vars
+        .vars
         .get(&name)
         .ok_or_else(|| Error {
             span: expr.1.clone(),
             msg: format!("No such variable '{:?}' in scope (string error)", name),
-        })
-        .or_else(|err| ctx.vars.get(&name).ok_or(err))?
+        })?
         .to_owned();
 
     if let Some(type_) = ctx.types.get(&v.0) {
@@ -176,14 +175,34 @@ fn comp_var(
         Value::Comp(h) => {
             //println!("{:?}\n{:?}", h, sub);
             let mut ctx = Ctx {
-                vars: ctx.vars.clone(),
-                local_vars: h,
+                vars: h,
+                local_vars: ctx.local_vars.clone(),
                 types: ctx.types.clone(),
                 channel: ctx.channel.clone(),
                 input: Arc::clone(&ctx.input),
             };
 
             eval(sub, &mut ctx)?
+        }
+        Value::Arr(h) => {
+            let mut ctx_temp = Ctx {
+                vars: h,
+                local_vars: ctx.local_vars.clone(),
+                types: ctx.types.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
+            };
+
+            eval(sub, &mut ctx_temp).or_else(|_| {
+                let index = eval(sub, ctx)?;
+                eval(
+                    &(
+                        Expr::Var(Box::new((Expr::Value(index), sub.1.clone()))),
+                        sub.1.clone(),
+                    ),
+                    &mut ctx_temp,
+                )
+            })?
         }
         v => {
             return Err(Error {

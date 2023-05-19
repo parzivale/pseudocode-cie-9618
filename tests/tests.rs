@@ -60,13 +60,18 @@ fn test_array_primitives() {
         Ok(())
     };
 
+    let output_values = Mutex::new(Vec::new());
     let output = |s: String| {
-        println!("{}", s);
+        output_values.lock().unwrap().push(s);
     };
 
     let mut interpreter = Interpreter::new(input, output);
 
     assert!(interpreter.interpret(code).is_ok());
+    assert_eq!(
+        *output_values.lock().unwrap(),
+        vec!["1 ", "2 ", "hi there ", "a ", "true ", "\n"]
+    );
 }
 
 #[test]

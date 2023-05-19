@@ -1,0 +1,13 @@
+FUNCTION factorial(a:REAL) RETURNS REAL
+    IF a <= 0.0
+        THEN
+            RETURN 1.0
+    ENDIF
+    RETURN a*factorial(a-1.0)
+ENDFUNCTION
+
+DECLARE s:STRING
+
+INPUT s
+
+OUTPUT factorial(STRING_TO_REAL(s))

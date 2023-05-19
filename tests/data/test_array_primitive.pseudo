@@ -5,7 +5,9 @@ DECLARE d:ARRAY[1:10] OF CHAR
 DECLARE e:ARRAY[1:10] OF BOOLEAN
 
 a[1] <- 1
-b[1] <- 1.0
+b[1] <- 2.0
 c[1] <- "hi there"
 d[1] <- 'a'
 e[1] <- TRUE
+
+OUTPUT a[1], b[1], c[1], d[1], e[1]

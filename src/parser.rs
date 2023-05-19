@@ -14,6 +14,7 @@ pub enum Value {
     Str(String),
     Char(char),
     Comp(HashMap<String, (String, Option<Value>)>),
+    Arr(HashMap<String, (String, Option<Value>)>),
     Func(String),
     Builtin(String),
     Return(Box<Self>),
