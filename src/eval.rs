@@ -103,6 +103,8 @@ pub type TypeMap = HashMap<String, Types>;
 
 pub struct Ctx {
     pub vars: VarMap,
+    // This field should only ever be used by functions
+    // if you see this used somewhere else we are fucked
     pub local_vars: VarMap,
     pub types: TypeMap,
     pub channel: Sender<Actions>,
@@ -127,6 +129,7 @@ impl Default for Ctx {
     }
 }
 
+// string to value lookup essentially
 fn var(expr: &Spanned<Expr>, ctx: &mut Ctx, name: &Spanned<Expr>) -> Result<Value, Error> {
     let name = match eval(name, ctx)? {
         Value::Str(s) => s,
@@ -165,6 +168,8 @@ fn var(expr: &Spanned<Expr>, ctx: &mut Ctx, name: &Spanned<Expr>) -> Result<Valu
     }
 }
 
+// composite datatype expansion, needed as a seperate function as
+// is recursivley descends down the type
 fn comp_var(
     expr: &Spanned<Expr>,
     ctx: &mut Ctx,
@@ -172,6 +177,10 @@ fn comp_var(
     sub: &Spanned<Expr>,
 ) -> Result<Value, Error> {
     Ok(match eval(name, ctx)? {
+        // distinction needed between composite and array
+        // as the array can have global variables as children
+        // which need to be looked up in a different scope
+        // we try the local scope first for raw values
         Value::Comp(h) => {
             //println!("{:?}\n{:?}", h, sub);
             let mut ctx = Ctx {
@@ -266,6 +275,7 @@ fn assign(
 
     // different actions for different types
     match type_.clone() {
+        // composite types need to be descended to assign their final values
         Types::Composite(h) => {
             //temporary type map to find the final type
             let temp_types = h.clone();
@@ -293,6 +303,7 @@ fn assign(
 
             // end of composite type actions
         }
+        // arrays need to have fixed bounds, maybe switch to a new datatype at some point?
         Types::Array(type_string_, start, end) => {
             let mut h = HashMap::new();
             for i in start..(end + 1) {
@@ -341,6 +352,7 @@ fn assign(
     eval(then, ctx)
 }
 
+// output needs to be async capable
 fn output(val: &Vec<Spanned<Expr>>, then: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     for i in val {
         let out = eval(i, ctx)?;

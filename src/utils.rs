@@ -262,6 +262,19 @@ pub fn update_comp_vars(
                             h.insert(s, (type_, Some(map)));
                             map = Value::Comp(h);
                         }
+                        Value::Arr(h) => {
+                            let type_ = h
+                                .get(&s)
+                                .ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Couldn't find key '{}'", s),
+                                })?
+                                .clone()
+                                .0;
+                            let mut h = h.clone();
+                            h.insert(s, (type_, Some(map)));
+                            map = Value::Arr(h);
+                        },
                         v => {
                             return Err(Error {
                                 span: expr.1.clone(),
@@ -284,6 +297,19 @@ pub fn update_comp_vars(
                             let mut h = h.clone();
                             h.insert(i_.to_string(), (type_, Some(map)));
                             map = Value::Comp(h);
+                        }
+                        Value::Arr(h) => {
+                            let type_ = h
+                                .get(&i_.to_string())
+                                .ok_or_else(|| Error {
+                                    span: expr.1.clone(),
+                                    msg: format!("Couldn't find key '{}'", i_),
+                                })?
+                                .clone()
+                                .0;
+                            let mut h = h.clone();
+                            h.insert(i_.to_string(), (type_, Some(map)));
+                            map = Value::Arr(h);
                         }
                         v => {
                             return Err(Error {
