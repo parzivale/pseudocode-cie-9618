@@ -13,6 +13,7 @@ use std::{
 use ariadne::{Color, Fmt, Label, Report, ReportKind};
 
 mod bin_ops;
+mod builtins;
 mod eval;
 mod lexer;
 mod parser;
