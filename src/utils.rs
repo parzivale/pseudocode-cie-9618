@@ -17,6 +17,7 @@ pub fn comp_fill(
         // if types exsists locally then continue local expansion
         match types.get(&i.1) {
             Some(t) => match t {
+                // if its a composite fill its children
                 Types::Composite(h) => {
                     for _ in h {
                         match types.get(&i.1) {
@@ -26,6 +27,21 @@ pub fn comp_fill(
                                     (
                                         i.1.clone(),
                                         Some(Value::Comp(comp_fill(
+                                            h.clone(),
+                                            &mut types.clone(),
+                                            rhs.clone(),
+                                            expr,
+                                            last.clone(),
+                                        )?)),
+                                    ),
+                                );
+                            }
+                            Some(Types::Array(_, _, _)) => {
+                                temp_types.insert(
+                                    i.0.clone(),
+                                    (
+                                        i.1.clone(),
+                                        Some(Value::Arr(comp_fill(
                                             h.clone(),
                                             &mut types.clone(),
                                             rhs.clone(),
@@ -46,6 +62,7 @@ pub fn comp_fill(
                         }
                     }
                 }
+                // also fill arrays
                 Types::Array(t, s, e) => {
                     let mut temp = HashMap::new();
                     match types.get(t) {
@@ -67,6 +84,8 @@ pub fn comp_fill(
                             }
                         }
                         Some(Types::Array(t, s, e)) => {
+                            // needed extra levels as we dont get the hash map of types of the array
+                            // from the type
                             match types.get(t) {
                                 Some(Types::Composite(h)) => {
                                     for i in *s..(*e + 1) {
@@ -115,6 +134,7 @@ pub fn comp_fill(
                                 }
                             };
                         }
+                        // not composite we can just fill with whatever
                         _ => {
                             for i in *s..(*e + 1) {
                                 temp.insert(i.to_string(), (t.clone(), None::<Value>));
@@ -124,6 +144,7 @@ pub fn comp_fill(
                     }
                     temp_types.insert(i.0.clone(), (i.1.clone(), Some(Value::Arr(temp))));
                 }
+                // if its not a composite type just fill with whatever
                 _ => {
                     if i.0.clone() == last {
                         temp_types.insert(i.0.clone(), (i.1.clone(), Some(rhs.clone())));
@@ -274,11 +295,14 @@ pub fn update_comp_vars(
                             let mut h = h.clone();
                             h.insert(s, (type_, Some(map)));
                             map = Value::Arr(h);
-                        },
+                        }
                         v => {
                             return Err(Error {
                                 span: expr.1.clone(),
-                                msg: format!("Cannot update composite component of a primitive  '{}'", v),
+                                msg: format!(
+                                    "Cannot update composite component of a primitive  '{}'",
+                                    v
+                                ),
                             })
                         }
                     };
