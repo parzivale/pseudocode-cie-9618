@@ -434,6 +434,352 @@ fn func(
     eval(then, ctx)
 }
 
+fn proc_call(ctx: &mut Ctx, expr: &Spanned<Expr>, then: &Spanned<Expr>) -> Result<Value, Error> {
+    eval(expr, ctx)?;
+    eval(then, ctx)
+}
+
+fn call(
+    ctx: &mut Ctx,
+    func_string: &String,
+    args: &[Spanned<Expr>],
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    //gets the function definition from the type table
+    let ctypes = ctx.types.clone();
+    let func = ctypes.get(&func_string.clone()).ok_or_else(|| Error {
+        span: expr.1.clone(),
+        msg: format!("function '{}' has not been declared", func_string),
+    })?;
+
+    //makes sure what we got back was a function
+    match func {
+        Types::Func(f) => {
+            if args.len() != f.args.len() {
+                return Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!(
+                        "arg count mismatch between definition and call. Expected {} args got {}",
+                        f.args.len(),
+                        args.len()
+                    ),
+                });
+            }
+            let mut vars_func = HashMap::new();
+            let mut reference = Vec::new();
+            //type check each argument
+            for (n, i) in args.iter().enumerate() {
+                let name = match &i.0 {
+                    Expr::Var(n) => Some(n),
+                    _ => None,
+                };
+                // checks if type exsists
+                let t_def = f
+                    .args
+                    .get(n)
+                    .ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("No arg found at index '{}'", n),
+                    })?
+                    .clone();
+                let t_type = ctx
+                    .types
+                    .get(&t_def.1)
+                    .ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Type '{}' is not declared", t_def.1),
+                    })?
+                    .clone();
+
+                let v_type = Types::from(eval(i, ctx)?);
+
+                //checks if types dont match
+                if t_type != v_type {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("Type '{:?}' does not match type '{:?}'", t_type, v_type),
+                    });
+                }
+
+                //store the vars on a local var map
+                vars_func.insert((t_def.0).1.clone(), (t_def.1, Some(eval(i, ctx)?)));
+
+                // store whether the variable was passed byref
+                if (t_def.0).0 == ArgMode::Byref {
+                    if let Some(name) = name {
+                        reference.push((name, (t_def.0).1));
+                    }
+                }
+            }
+
+            let mut temp_ctx = Ctx {
+                vars: vars_func,
+                local_vars: ctx.local_vars.clone(),
+                types: ctx.types.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
+            };
+
+            let output = eval(&f.body, &mut temp_ctx);
+
+            // update the variables that where passed byref
+
+            for i in reference {
+                let name = match eval(i.0, ctx)? {
+                    Value::Str(s) => s,
+                    n => {
+                        return Err(Error {
+                            span: expr.1.clone(),
+                            msg: format!("No such variable '{}' in scope", n),
+                        })
+                    }
+                };
+
+                if let Some(v) = temp_ctx.vars.get(&i.1) {
+                    ctx.vars.insert(name.to_string(), v.clone());
+                }
+            }
+
+            let res = output?;
+            let output = match res {
+                Value::Return(t) => *t,
+                Value::Null => Value::Null,
+                v => {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("Value '{}' is not a return type", v),
+                    })
+                }
+            };
+
+            let return_type = ctx.types.get(&f.returns).ok_or_else(|| Error {
+                span: expr.1.clone(),
+                msg: format!("Type '{}' has not been declared", f.returns),
+            })?;
+            if return_type.clone() == Types::from(output.clone()) {
+                Ok(output)
+            } else {
+                Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!(
+                        "Type '{:?}' does not match return type type '{:?}'",
+                        Types::from(output),
+                        return_type.clone()
+                    ),
+                })
+            }
+        }
+        Types::Builtin(f) => {
+            if args.len() != f.args.len() {
+                return Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!(
+                        "arg count mismatch between definition and call. Expected {} args got {}",
+                        f.args.len(),
+                        args.len()
+                    ),
+                });
+            }
+
+            let mut vars_func = Vec::new();
+
+            for (n, i) in args.iter().enumerate() {
+                // checks if type exsists
+                let t_def = f
+                    .args
+                    .get(n)
+                    .ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("No arg found at index '{}'", n),
+                    })?
+                    .clone();
+                let t_type = ctx
+                    .types
+                    .get(&t_def)
+                    .ok_or_else(|| Error {
+                        span: expr.1.clone(),
+                        msg: format!("Type '{}' is not declared", t_def),
+                    })?
+                    .clone();
+
+                let v_type = Types::from(eval(i, ctx)?);
+
+                //checks if types dont match
+                if t_type != v_type {
+                    return Err(Error {
+                        span: expr.1.clone(),
+                        msg: format!("Type '{:?}' does not match type '{:?}'", t_type, v_type),
+                    });
+                }
+
+                //store the vars on a local var map
+                vars_func.push(eval(i, ctx)?);
+            }
+
+            match func_string.as_str() {
+                "RIGHT" => builtins::right(&vars_func, expr),
+                "LENGTH" => builtins::length(&vars_func, expr),
+                "MID" => builtins::mid(&vars_func, expr),
+                "LCASE" => builtins::lcase(&vars_func, expr),
+                "UCASE" => builtins::ucase(&vars_func, expr),
+                "REAL_TO_INTEGER" => builtins::real_to_integer(&vars_func, expr),
+                "INTEGER_TO_REAL" => builtins::integer_to_real(&vars_func, expr),
+                "ASC" => builtins::asc(&vars_func, expr),
+                "MOD" => builtins::mod_(&vars_func, expr),
+                "INTEGER_TO_STRING" => builtins::integer_to_string(&vars_func, expr),
+                "REAL_TO_STRING" => builtins::real_to_string(&vars_func, expr),
+                "CHAR_TO_STRING" => builtins::char_to_string(&vars_func, expr),
+                "STRING_TO_CHAR" => builtins::string_to_char(&vars_func, expr),
+                "STRING_TO_REAL" => builtins::string_to_real(&vars_func, expr),
+                "STRING_TO_INTEGER" => builtins::string_to_integer(&vars_func, expr),
+                "CHAR_TO_INTEGER" => builtins::char_to_integer(&vars_func, expr),
+                "CHAR_TO_REAL" => builtins::char_to_real(&vars_func, expr),
+                s => Err(Error {
+                    span: expr.1.clone(),
+                    msg: format!("Builtin '{}' has not been defined", s),
+                }),
+            }
+        }
+        _ => Err(Error {
+            span: expr.1.clone(),
+            msg: format!("identifier '{:?}' is not a function", func),
+        }),
+    }
+}
+
+fn declare_arr(
+    ctx: &mut Ctx,
+    name: &str,
+    start: &Spanned<Expr>,
+    end: &Spanned<Expr>,
+    type_: &str,
+    then: &Spanned<Expr>,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let start = match eval(start, ctx)? {
+        Value::Int(i) => i,
+        v => {
+            return Err(Error {
+                span: expr.1.clone(),
+                msg: format!("Start of the array must be an integer, found '{}'", v),
+            })
+        }
+    };
+    let end = match eval(end, ctx)? {
+        Value::Int(i) => i,
+        v => {
+            return Err(Error {
+                span: expr.1.clone(),
+                msg: format!("End of the array must be an integer, found '{}'", v),
+            })
+        }
+    };
+
+    ctx.types.insert(
+        name.to_string(),
+        Types::Array(type_.to_string(), start, end),
+    );
+    ctx.vars.insert(name.to_string(), (name.to_string(), None));
+    eval(then, ctx)
+    //types.remove(name);
+    //vars.remove(name);
+}
+
+fn while_(
+    ctx: &mut Ctx,
+    cond: &Spanned<Expr>,
+    body: &Spanned<Expr>,
+    then: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    while eval(cond, ctx)? == Value::Bool(true) {
+        match eval(body, ctx)? {
+            Value::Return(t) => return Ok(Value::Return(t)),
+            v => v,
+        };
+    }
+    eval(then, ctx)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn for_(
+    ctx: &mut Ctx,
+    start_expr: &Spanned<Expr>,
+    end: &Spanned<Expr>,
+    body: &Spanned<Expr>,
+    var: &Spanned<Expr>,
+    step: &Spanned<Expr>,
+    then: &Spanned<Expr>,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    eval(start_expr, ctx)?;
+    let start = match eval(var, ctx)? {
+        Value::Int(i) => i,
+        v => {
+            println!("{:?}", v);
+            unreachable!()
+        }
+    };
+    let end = match eval(end, ctx)? {
+        Value::Int(i) => i,
+        v => {
+            println!("{:?}", v);
+            unreachable!()
+        }
+    };
+
+    let step = match eval(step, ctx)? {
+        Value::Int(i) => i,
+        v => {
+            println!("{:?}", v);
+            unreachable!()
+        }
+    };
+
+    for i in ((start)..(end + 1)).step_by(step as usize) {
+        let rhs = (Expr::Value(Value::Int(i)), start_expr.clone().1);
+
+        match start_expr {
+            (Expr::Assign(name, children, _, then), _) => {
+                assign(expr, ctx, name, children, &rhs, then)?
+            }
+            _ => unreachable!(),
+        };
+
+        match eval(body, ctx)? {
+            Value::Return(t) => return Ok(Value::Return(t)),
+            v => v,
+        };
+    }
+
+    eval(then, ctx)
+}
+
+fn input(
+    ctx: &mut Ctx,
+    name: &Spanned<Expr>,
+    children: &[Spanned<Expr>],
+    then: &Spanned<Expr>,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let name_string = eval(name, ctx)?.to_string();
+    ctx.channel.send(Actions::Input).unwrap();
+    thread::park();
+
+    {
+        let string = (*ctx.input.lock().unwrap()).trim().to_string();
+        *ctx.input.lock().unwrap() = "".to_string();
+        if ctx.vars.get(&name_string).is_some() {
+            let rhs = (Expr::Value(Value::Str(string)), expr.1.clone());
+            assign(expr, ctx, name, &children.to_vec(), &rhs, then)
+        } else {
+            Err(Error {
+                span: expr.1.clone(),
+                msg: format!("Var '{}' has not been declared", name_string),
+            })
+        }
+    }
+}
+
 #[allow(unreachable_patterns)]
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
@@ -459,315 +805,17 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
         Expr::If(cond, a, b, body) => if_(cond, a, b, body, ctx)?,
         Expr::DeclareComp(name, items, body) => declare_comp(ctx, items, name, body)?,
         Expr::Func(name, args, type_, body, then) => func(ctx, name, args, body, then, type_)?,
-        Expr::ProcCall(expr, then) => {
-            eval(expr, ctx)?;
-            eval(then, ctx)?
-        }
-        Expr::Call(func_string, args) => {
-            //gets the function definition from the type table
-            let ctypes = ctx.types.clone();
-            let func = ctypes.get(&func_string.clone()).ok_or_else(|| Error {
-                span: expr.1.clone(),
-                msg: format!("function '{}' has not been declared", func_string),
-            })?;
-
-            //makes sure what we got back was a function
-            match func {
-                Types::Func(f) => {
-                    if args.len() != f.args.len() {
-                        return Err(Error{
-                            span: expr.1.clone(),
-                            msg: format!("arg count mismatch between definition and call. Expected {} args got {}", f.args.len(), args.len())
-                        });
-                    }
-                    let mut vars_func = HashMap::new();
-                    let mut reference = Vec::new();
-                    //type check each argument
-                    for (n, i) in args.iter().enumerate() {
-                        let name = match &i.0 {
-                            Expr::Var(n) => Some(n),
-                            _ => None,
-                        };
-                        // checks if type exsists
-                        let t_def = f
-                            .args
-                            .get(n)
-                            .ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!("No arg found at index '{}'", n),
-                            })?
-                            .clone();
-                        let t_type = ctx
-                            .types
-                            .get(&t_def.1)
-                            .ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!("Type '{}' is not declared", t_def.1),
-                            })?
-                            .clone();
-
-                        let v_type = Types::from(eval(i, ctx)?);
-
-                        //checks if types dont match
-                        if t_type != v_type {
-                            return Err(Error {
-                                span: expr.1.clone(),
-                                msg: format!(
-                                    "Type '{:?}' does not match type '{:?}'",
-                                    t_type, v_type
-                                ),
-                            });
-                        }
-
-                        //store the vars on a local var map
-                        vars_func.insert((t_def.0).1.clone(), (t_def.1, Some(eval(i, ctx)?)));
-
-                        // store whether the variable was passed byref
-                        if (t_def.0).0 == ArgMode::Byref {
-                            if let Some(name) = name {
-                                reference.push((name, (t_def.0).1));
-                            }
-                        }
-                    }
-
-                    let mut temp_ctx = Ctx {
-                        vars: vars_func,
-                        local_vars: ctx.local_vars.clone(),
-                        types: ctx.types.clone(),
-                        channel: ctx.channel.clone(),
-                        input: Arc::clone(&ctx.input),
-                    };
-
-                    let output = eval(&f.body, &mut temp_ctx);
-
-                    // update the variables that where passed byref
-
-                    for i in reference {
-                        let name = match eval(i.0, ctx)? {
-                            Value::Str(s) => s,
-                            n => {
-                                return Err(Error {
-                                    span: expr.1.clone(),
-                                    msg: format!("No such variable '{}' in scope", n),
-                                })
-                            }
-                        };
-
-                        if let Some(v) = temp_ctx.vars.get(&i.1) {
-                            ctx.vars.insert(name.to_string(), v.clone());
-                        }
-                    }
-
-                    let res = output?;
-                    let output = match res {
-                        Value::Return(t) => *t,
-                        Value::Null => Value::Null,
-                        v => {
-                            return Err(Error {
-                                span: expr.1.clone(),
-                                msg: format!("Value '{}' is not a return type", v),
-                            })
-                        }
-                    };
-
-                    let return_type = ctx.types.get(&f.returns).ok_or_else(|| Error {
-                        span: expr.1.clone(),
-                        msg: format!("Type '{}' has not been declared", f.returns),
-                    })?;
-                    if return_type.clone() == Types::from(output.clone()) {
-                        output
-                    } else {
-                        return Err(Error {
-                            span: expr.1.clone(),
-                            msg: format!(
-                                "Type '{:?}' does not match return type type '{:?}'",
-                                Types::from(output),
-                                return_type.clone()
-                            ),
-                        });
-                    }
-                }
-                Types::Builtin(f) => {
-                    if args.len() != f.args.len() {
-                        return Err(Error{
-                            span: expr.1.clone(),
-                            msg: format!("arg count mismatch between definition and call. Expected {} args got {}", f.args.len(), args.len())
-                        });
-                    }
-
-                    let mut vars_func = Vec::new();
-
-                    for (n, i) in args.iter().enumerate() {
-                        // checks if type exsists
-                        let t_def = f
-                            .args
-                            .get(n)
-                            .ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!("No arg found at index '{}'", n),
-                            })?
-                            .clone();
-                        let t_type = ctx
-                            .types
-                            .get(&t_def)
-                            .ok_or_else(|| Error {
-                                span: expr.1.clone(),
-                                msg: format!("Type '{}' is not declared", t_def),
-                            })?
-                            .clone();
-
-                        let v_type = Types::from(eval(i, ctx)?);
-
-                        //checks if types dont match
-                        if t_type != v_type {
-                            return Err(Error {
-                                span: expr.1.clone(),
-                                msg: format!(
-                                    "Type '{:?}' does not match type '{:?}'",
-                                    t_type, v_type
-                                ),
-                            });
-                        }
-
-                        //store the vars on a local var map
-                        vars_func.push(eval(i, ctx)?);
-                    }
-
-                    match func_string.as_str() {
-                        "RIGHT" => builtins::right(&vars_func, expr)?,
-                        "LENGTH" => builtins::length(&vars_func, expr)?,
-                        "MID" => builtins::mid(&vars_func, expr)?,
-                        "LCASE" => builtins::lcase(&vars_func, expr)?,
-                        "UCASE" => builtins::ucase(&vars_func, expr)?,
-                        "REAL_TO_INTEGER" => builtins::real_to_integer(&vars_func, expr)?,
-                        "INTEGER_TO_REAL" => builtins::integer_to_real(&vars_func, expr)?,
-                        "ASC" => builtins::asc(&vars_func, expr)?,
-                        "MOD" => builtins::mod_(&vars_func, expr)?,
-                        "INTEGER_TO_STRING" => builtins::integer_to_string(&vars_func, expr)?,
-                        "REAL_TO_STRING" => builtins::real_to_string(&vars_func, expr)?,
-                        "CHAR_TO_STRING" => builtins::char_to_string(&vars_func, expr)?,
-                        "STRING_TO_CHAR" => builtins::string_to_char(&vars_func, expr)?,
-                        "STRING_TO_REAL" => builtins::string_to_real(&vars_func, expr)?,
-                        "STRING_TO_INTEGER" => builtins::string_to_integer(&vars_func, expr)?,
-                        "CHAR_TO_INTEGER" => builtins::char_to_integer(&vars_func, expr)?,
-                        "CHAR_TO_REAL" => builtins::char_to_real(&vars_func, expr)?,
-                        s => {
-                            return Err(Error {
-                                span: expr.1.clone(),
-                                msg: format!("Builtin '{}' has not been defined", s),
-                            })
-                        }
-                    }
-                }
-                _ => {
-                    return Err(Error {
-                        span: expr.1.clone(),
-                        msg: format!("identifier '{:?}' is not a function", func),
-                    })
-                }
-            }
-        }
+        Expr::ProcCall(expr, then) => proc_call(ctx, expr, then)?,
+        Expr::Call(func_string, args) => call(ctx, func_string, args, expr)?,
         Expr::Return(v) => Value::Return(Box::new(eval(v, ctx)?)),
         Expr::DeclareArr(name, start, end, type_, then) => {
-            let start = match eval(start, ctx)? {
-                Value::Int(i) => i,
-                v => {
-                    return Err(Error {
-                        span: expr.1.clone(),
-                        msg: format!("Start of the array must be an integer, found '{}'", v),
-                    })
-                }
-            };
-            let end = match eval(end, ctx)? {
-                Value::Int(i) => i,
-                v => {
-                    return Err(Error {
-                        span: expr.1.clone(),
-                        msg: format!("End of the array must be an integer, found '{}'", v),
-                    })
-                }
-            };
-
-            ctx.types
-                .insert(name.clone(), Types::Array(type_.clone(), start, end));
-            ctx.vars.insert(name.clone(), (name.clone(), None));
-            let output = eval(then, ctx);
-            //types.remove(name);
-            //vars.remove(name);
-            output?
+            declare_arr(ctx, name, start, end, type_, then, expr)?
         }
-        Expr::While(cond, body, then) => {
-            while eval(cond, ctx)? == Value::Bool(true) {
-                match eval(body, ctx)? {
-                    Value::Return(t) => return Ok(Value::Return(t)),
-                    v => v,
-                };
-            }
-
-            eval(then, ctx)?
-        }
+        Expr::While(cond, body, then) => while_(ctx, cond, body, then)?,
         Expr::For(start_expr, end, step, body, var, then) => {
-            eval(start_expr, ctx)?;
-            let start = match eval(var, ctx)? {
-                Value::Int(i) => i,
-                v => {
-                    println!("{:?}", v);
-                    unreachable!()
-                }
-            };
-            let end = match eval(end, ctx)? {
-                Value::Int(i) => i,
-                v => {
-                    println!("{:?}", v);
-                    unreachable!()
-                }
-            };
-
-            let step = match eval(step, ctx)? {
-                Value::Int(i) => i,
-                v => {
-                    println!("{:?}", v);
-                    unreachable!()
-                }
-            };
-
-            for i in ((start)..(end + 1)).step_by(step as usize) {
-                let rhs = (Expr::Value(Value::Int(i)), start_expr.clone().1);
-
-                match &**start_expr {
-                    (Expr::Assign(name, children, _, then), _) => {
-                        assign(expr, ctx, name, children, &rhs, then)?
-                    }
-                    _ => unreachable!(),
-                };
-
-                match eval(body, ctx)? {
-                    Value::Return(t) => return Ok(Value::Return(t)),
-                    v => v,
-                };
-            }
-
-            eval(then, ctx)?
+            for_(ctx, start_expr, end, body, var, step, then, expr)?
         }
-        Expr::Input(name, children, then) => {
-            let name_string = eval(name, ctx)?.to_string();
-            ctx.channel.send(Actions::Input).unwrap();
-            thread::park();
-
-            {
-                let string = (*ctx.input.lock().unwrap()).trim().to_string();
-                *ctx.input.lock().unwrap() = "".to_string();
-                if ctx.vars.get(&name_string).is_some() {
-                    let rhs = (Expr::Value(Value::Str(string)), expr.1.clone());
-                    assign(expr, ctx, name, children, &rhs, then)?
-                } else {
-                    return Err(Error {
-                        span: expr.1.clone(),
-                        msg: format!("Var '{}' has not been declared", name_string),
-                    });
-                }
-            }
-        }
+        Expr::Input(name, children, then) => input(ctx, name, children, then, expr)?,
         _ => {
             todo!()
         }
