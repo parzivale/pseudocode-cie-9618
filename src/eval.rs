@@ -216,7 +216,7 @@ fn comp_var(
         v => {
             return Err(Error {
                 span: expr.1.clone(),
-                msg: format!("Unexpected value '{:?}'", v),
+                msg: format!("Cannot use primitive as composite datatype, got: '{:?}'", v),
             })
         }
     })

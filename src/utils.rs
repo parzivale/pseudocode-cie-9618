@@ -278,7 +278,7 @@ pub fn update_comp_vars(
                         v => {
                             return Err(Error {
                                 span: expr.1.clone(),
-                                msg: format!("Unexpected value '{}'", v),
+                                msg: format!("Cannot update composite component of a primitive  '{}'", v),
                             })
                         }
                     };
