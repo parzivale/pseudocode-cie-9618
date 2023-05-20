@@ -389,6 +389,51 @@ fn if_(
     }
 }
 
+fn declare_comp(
+    ctx: &mut Ctx,
+    items: &Spanned<Expr>,
+    name: &str,
+    body: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let mut ctx_temp = Ctx {
+        local_vars: ctx.local_vars.clone(),
+        types: ctx.types.clone(),
+        vars: HashMap::new(),
+        channel: ctx.channel.clone(),
+        input: Arc::clone(&ctx.input),
+    };
+    eval(items, &mut ctx_temp)?;
+    let mut map = HashMap::new();
+    for i in ctx_temp.vars {
+        map.insert(i.0, (i.1).0);
+    }
+    ctx.types.insert(name.to_string(), Types::Composite(map));
+    eval(body, ctx)
+}
+
+fn func(
+    ctx: &mut Ctx,
+    name: &str,
+    args: &[((ArgMode, String), String)],
+    body: &Spanned<Expr>,
+    then: &Spanned<Expr>,
+    type_: &str,
+) -> Result<Value, Error> {
+    ctx.types.insert(
+        name.to_string(),
+        Types::Func(Func {
+            args: args.to_vec(),
+            body: Box::new(body.to_owned()),
+            returns: type_.to_string(),
+        }),
+    );
+    ctx.vars.insert(
+        name.to_string(),
+        (name.to_string(), Some(Value::Func(name.to_string()))),
+    );
+    eval(then, ctx)
+}
+
 #[allow(unreachable_patterns)]
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
@@ -412,38 +457,8 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
         Expr::Binary(a, BinaryOp::Concat, b) => bin_concat(a, b, ctx, expr)?,
         Expr::Output(val, then) => output(val, then, ctx)?,
         Expr::If(cond, a, b, body) => if_(cond, a, b, body, ctx)?,
-        Expr::DeclareComp(name, items, body) => {
-            let mut ctx_temp = Ctx {
-                local_vars: ctx.local_vars.clone(),
-                types: ctx.types.clone(),
-                vars: HashMap::new(),
-                channel: ctx.channel.clone(),
-                input: Arc::clone(&ctx.input),
-            };
-            eval(items, &mut ctx_temp)?;
-            let mut map = HashMap::new();
-            for i in ctx_temp.vars {
-                map.insert(i.0, (i.1).0);
-            }
-            ctx.types.insert(name.clone(), Types::Composite(map));
-            let output = eval(body, ctx);
-            output?
-        }
-        Expr::Func(name, args, type_, body, then) => {
-            ctx.types.insert(
-                name.to_string(),
-                Types::Func(Func {
-                    args: args.clone(),
-                    body: body.clone(),
-                    returns: type_.clone(),
-                }),
-            );
-            ctx.vars.insert(
-                name.to_string(),
-                (name.to_string(), Some(Value::Func(name.to_string()))),
-            );
-            eval(then, ctx)?
-        }
+        Expr::DeclareComp(name, items, body) => declare_comp(ctx, items, name, body)?,
+        Expr::Func(name, args, type_, body, then) => func(ctx, name, args, body, then, type_)?,
         Expr::ProcCall(expr, then) => {
             eval(expr, ctx)?;
             eval(then, ctx)?

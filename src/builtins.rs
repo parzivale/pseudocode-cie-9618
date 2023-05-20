@@ -1,5 +1,5 @@
 use crate::{
-    eval::{eval, Ctx, Error},
+    eval::Error,
     parser::{Expr, Value},
     prelude::*,
 };
