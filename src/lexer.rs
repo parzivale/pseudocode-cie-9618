@@ -124,6 +124,13 @@ pub fn lexer() -> impl Parser<char, Vec<Spanned<TokenTree>>, Error = Simple<char
             "REAL" => Token::Type("REAL".into()),
             "DATE" => Token::Type("DATE".into()),
             "STRING" => Token::Type("STRING".into()),
+            "OPENFILE" => Token::Keyword("OPENFILE".into()),
+            "CLOSEFILE" => Token::Keyword("CLOSEFILE".into()),
+            "WRITEFILE" => Token::Keyword("WRITEFILE".into()),
+            "READFILE" => Token::Keyword("READFILE".into()),
+            "READ" => Token::Keyword("READ".into()),
+            "WRITE" => Token::Keyword("WRITE".into()),
+            "APPEND" => Token::Keyword("APPEND".into()),
             _ => Token::Ident(ident),
         });
 
