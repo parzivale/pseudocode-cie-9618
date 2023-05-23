@@ -1,4 +1,4 @@
-use pseudocode::prelude::*;
+use pseudocode::{prelude::*, WriteMode};
 use std::fs;
 
 #[test]
@@ -18,7 +18,11 @@ fn test_primitives() {
         output_values.lock().unwrap().push(s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(
@@ -43,7 +47,11 @@ fn test_primitive_type_check() {
         println!("{}", s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_err());
 }
@@ -65,7 +73,11 @@ fn test_array_primitives() {
         output_values.lock().unwrap().push(s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(
@@ -90,7 +102,11 @@ fn test_array_out_of_range_index() {
         println!("{}", s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_err());
 }
@@ -111,7 +127,11 @@ fn test_composite_primitives() {
         println!("{}", s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
 }
@@ -131,7 +151,11 @@ fn test_if_else() {
         println!("{}", s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
 }
@@ -151,7 +175,11 @@ fn test_non_key_access_composite() {
         println!("{}", s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_err());
 }
@@ -171,7 +199,11 @@ fn test_procedure_primitive() {
         println!("{}", s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
 }
@@ -191,7 +223,11 @@ fn test_procedure_composite() {
         println!("{}", s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
 }
@@ -212,7 +248,11 @@ fn test_array_composite() {
         output_values.lock().unwrap().push(s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(*output_values.lock().unwrap(), vec!["1 ", "\n"]);
@@ -234,7 +274,11 @@ fn test_byref_byval_procedure() {
         output_values.lock().unwrap().push(s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(
@@ -259,7 +303,11 @@ fn test_function_primitives() {
         output_values.lock().unwrap().push(s);
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(*output_values.lock().unwrap(), vec!["2 ", "\n", "2 ", "\n"]);
@@ -283,7 +331,11 @@ fn test_builtins() {
         }
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(
@@ -313,7 +365,11 @@ fn test_while_loop() {
         }
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(
@@ -340,7 +396,11 @@ fn test_for_loop() {
         }
     };
 
-    let mut interpreter = Interpreter::new(input, output);
+    let reader = |f: String, s: &mut String| Ok(());
+
+    let writer = |f: String, s: String| Ok(());
+
+    let mut interpreter = Interpreter::new(input, output, reader, writer);
 
     assert!(interpreter.interpret(code).is_ok());
     assert_eq!(

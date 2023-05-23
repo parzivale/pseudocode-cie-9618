@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    io,
+    error::Error,
+    fs::{self, File},
+    io::{self, Write},
+    path::{self, Path},
     rc::Rc,
     sync::{
         mpsc::{channel, Receiver, RecvTimeoutError, Sender},
@@ -28,30 +31,47 @@ pub use prelude::*;
 pub enum Actions {
     Output(String),
     Input,
+    Read(String),
+    Write(String, String),
+    Append(String, String),
 }
+
+#[derive(Clone, Debug)]
+pub enum WriteMode {
+    Write,
+    Append,
+}
+
 #[derive(Clone)]
-pub struct Interpreter<I, O> {
+pub struct Interpreter<I, O, R, W> {
     pub input: I,
     pub output: O,
+    pub reader: R,
+    pub writer: W,
     pub reciver: Rc<Receiver<Actions>>,
     pub sender: Sender<Actions>,
     pub input_buffer: Arc<Mutex<String>>,
+    pub file_buffer: Arc<Mutex<String>>,
 }
 
-impl<I, O> Interpreter<I, O>
+impl<I, O, R, W> Interpreter<I, O, R, W>
 where
-    I: FnOnce(&mut String) -> Result<(), io::Error> + Clone,
-    O: FnOnce(String) + Clone,
+    I: Fn(&mut String) -> Result<(), io::Error> + Clone,
+    O: Fn(String) + Clone,
+    R: Fn(String, &mut String) -> Result<(), io::Error> + Clone,
+    W: Fn(String, String) -> Result<(), io::Error> + Clone,
 {
-    pub fn new(input: I, output: O) -> Self {
+    pub fn new(input: I, output: O, reader: R, writer: W) -> Self {
         let (sender, reciver) = channel();
-
         Self {
             input,
             output,
+            reader,
+            writer,
             reciver: Rc::new(reciver),
             sender,
             input_buffer: Arc::new(Mutex::new("".to_string())),
+            file_buffer: Arc::new(Mutex::new("".to_string())),
         }
     }
 
@@ -227,6 +247,24 @@ where
                                 interpreter.thread().unpark();
                             }
                         }
+                        Ok(Actions::Read(file)) => {
+                            if let Err(err) =
+                                (self.reader.clone())(file, &mut self.file_buffer.lock().unwrap())
+                            {
+                                errs.push(Simple::custom(0..0, err.to_string()));
+                                interpreter.thread().unpark();
+                            } else {
+                                interpreter.thread().unpark();
+                            }
+                        }
+                        Ok(Actions::Write(file, data)) => {
+                            if let Err(err) = (self.writer.clone())(file, data) {
+                                errs.push(Simple::custom(0..0, err.to_string()));
+                                interpreter.thread().unpark();
+                            } else {
+                                interpreter.thread().unpark();
+                            }
+                        }
                         Err(RecvTimeoutError::Timeout) => {
                             if interpreter.is_finished() {
                                 break 'top;
@@ -328,5 +366,38 @@ where
         } else {
             Ok(())
         }
+    }
+}
+
+impl Default
+    for Interpreter<
+        fn(&mut String) -> Result<(), io::Error>,
+        fn(String),
+        fn(String, &mut String) -> Result<(), io::Error>,
+        fn(String, String) -> Result<(), io::Error>,
+    >
+{
+    fn default() -> Self {
+        let input = |s: &mut String| -> Result<(), io::Error> {
+            let stdin = io::stdin();
+            let mut buf = String::new();
+            stdin.read_line(&mut buf)?;
+            *s = buf;
+            Ok(())
+        };
+
+        let output = |s: String| {
+            println!("{}", s);
+        };
+
+        let reader = |f: String, s: &mut String| -> Result<(), io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::open(path)?;
+            Ok(())
+        };
+
+        let writer = |f: String, s: String| Ok(());
+
+        Interpreter::new(input, output, reader, writer)
     }
 }

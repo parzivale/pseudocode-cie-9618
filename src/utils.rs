@@ -265,6 +265,8 @@ pub fn update_comp_vars(
                 local_vars: ctx.local_vars.clone(),
                 channel: ctx.channel.clone(),
                 input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
             };
             let index = eval(index, &mut temp_ctx)?;
             match index {
@@ -442,6 +444,8 @@ pub fn type_check_comp(
             types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
             channel: ctx.channel.clone(),
             input: Arc::clone(&ctx.input),
+            file_read: Arc::clone(&ctx.file_read),
+            open_files: HashMap::new(),
         };
 
         let i = eval(i, &mut temp_ctx)?;

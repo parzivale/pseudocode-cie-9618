@@ -1,6 +1,11 @@
-use std::{collections::HashMap, fmt::Display, ops::Range};
+use std::{
+    fmt::Display,
+    io::{BufReader, BufWriter},
+    ops::Range,
+};
 
 use crate::{
+    eval::VarMap,
     lexer::{Delim, Token},
     prelude::*,
 };
@@ -13,8 +18,8 @@ pub enum Value {
     Real(f32),
     Str(String),
     Char(char),
-    Comp(HashMap<String, (String, Option<Value>)>),
-    Arr(HashMap<String, (String, Option<Value>)>),
+    Comp(VarMap),
+    Arr(VarMap),
     Func(String),
     Builtin(String),
     Return(Box<Self>),
@@ -112,6 +117,7 @@ pub enum Expr {
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
     Input(Box<Spanned<Self>>, Vec<Spanned<Self>>, Box<Spanned<Self>>),
     OpenFile(Box<Spanned<Self>>, FileMode, Box<Spanned<Self>>),
+    CloseFile(Box<Spanned<Self>>, Box<Spanned<Self>>),
     WriteFile(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     ReadFile(
         Box<Spanned<Self>>,
@@ -641,6 +647,22 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 )
             });
 
+        let close_file = just(Token::Keyword("OPENFILE".to_string()))
+            .ignore_then(raw_expr.clone())
+            .then(expr.clone().or_not())
+            .map_with_span(|(file_name, body), span| {
+                (
+                    Expr::CloseFile(
+                        Box::new(file_name),
+                        Box::new(match body {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span.clone()),
+                        }),
+                    ),
+                    span,
+                )
+            });
+
         let write_file = just(Token::Keyword("WRITEFILE".to_string()))
             .ignore_then(raw_expr.clone())
             .then_ignore(just(Token::Ctrl(',')))
@@ -706,6 +728,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(open_file)
             .or(write_file)
             .or(read_file)
+            .or(close_file)
             .labelled("block")
     })
     .then_ignore(end())

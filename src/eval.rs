@@ -1,5 +1,7 @@
 use std::{
     collections::HashMap,
+    fs::File,
+    io::{BufReader, BufWriter},
     sync::{mpsc::*, Arc, Mutex},
     thread,
 };
@@ -7,7 +9,7 @@ use std::{
 use crate::{
     bin_ops::*,
     builtins,
-    parser::{ArgMode, BinaryOp, Expr, Value},
+    parser::{ArgMode, BinaryOp, Expr, FileMode, Value},
     prelude::*,
 };
 
@@ -109,7 +111,12 @@ pub struct Ctx {
     pub local_vars: VarMap,
     pub types: TypeMap,
     pub channel: Sender<Actions>,
+    // different mutexes for file and stdin data
+    // this is due to concerns of a data race
+    // might not be necessary
     pub input: Arc<Mutex<String>>,
+    pub file_read: Arc<Mutex<String>>,
+    pub open_files: HashMap<String, FileMode>,
 }
 
 impl Ctx {
@@ -120,6 +127,8 @@ impl Ctx {
             types: HashMap::new(),
             channel: channel().0,
             input: Arc::new(Mutex::new("".to_string())),
+            file_read: Arc::new(Mutex::new("".to_string())),
+            open_files: HashMap::new(),
         }
     }
 }
@@ -190,6 +199,8 @@ fn comp_var(
                 types: ctx.types.clone(),
                 channel: ctx.channel.clone(),
                 input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
             };
 
             eval(sub, &mut ctx)?
@@ -201,6 +212,8 @@ fn comp_var(
                 types: ctx.types.clone(),
                 channel: ctx.channel.clone(),
                 input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
             };
 
             eval(sub, &mut ctx_temp).or_else(|_| {
@@ -401,6 +414,8 @@ fn declare_comp(
         vars: HashMap::new(),
         channel: ctx.channel.clone(),
         input: Arc::clone(&ctx.input),
+        file_read: Arc::clone(&ctx.file_read),
+        open_files: ctx.open_files.clone(),
     };
     eval(items, &mut ctx_temp)?;
     let mut map = HashMap::new();
@@ -518,6 +533,8 @@ fn call(
                 types: ctx.types.clone(),
                 channel: ctx.channel.clone(),
                 input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
             };
 
             let output = eval(&f.body, &mut temp_ctx);
@@ -780,6 +797,115 @@ fn input(
     }
 }
 
+fn write_file(
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+    file_name: &Spanned<Expr>,
+    data: &Spanned<Expr>,
+    body: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let file_string = eval(file_name, ctx)?.to_string();
+    let data = eval(data, ctx)?.to_string();
+    let mode = ctx.open_files.get(&file_string);
+    if mode != Some(&FileMode::Write) || mode != Some(&FileMode::Append) {
+        return Err(Error {
+            span: expr.1.clone(),
+            msg: format!(
+                "File {} has either not been opened or is not available for write",
+                file_string
+            ),
+        });
+    }
+
+    match mode.unwrap() {
+        FileMode::Write => ctx.channel.send(Actions::Write(file_string, data)).unwrap(),
+        FileMode::Append => ctx
+            .channel
+            .send(Actions::Append(file_string, data))
+            .unwrap(),
+        _ => unreachable!(),
+    };
+
+    thread::park();
+    eval(body, ctx)
+}
+
+fn read_file(
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+    file_name: &Spanned<Expr>,
+    name: &Spanned<Expr>,
+    children: &[Spanned<Expr>],
+    then: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let file_string = eval(file_name, ctx)?.to_string();
+    if ctx.open_files.get(&file_string) != Some(&FileMode::Read) {
+        return Err(Error {
+            span: expr.1.clone(),
+            msg: format!(
+                "File {} has either not been opened or is not available for read",
+                file_string
+            ),
+        });
+    }
+    let name_string = eval(name, ctx)?.to_string();
+    ctx.channel.send(Actions::Read(file_string)).unwrap();
+    thread::park();
+
+    {
+        let string = (*ctx.file_read.lock().unwrap()).trim().to_string();
+        *ctx.file_read.lock().unwrap() = "".to_string();
+        if ctx.vars.get(&name_string).is_some() {
+            let rhs = (Expr::Value(Value::Str(string)), expr.1.clone());
+            assign(expr, ctx, name, &children.to_vec(), &rhs, then)
+        } else {
+            Err(Error {
+                span: expr.1.clone(),
+                msg: format!("Var '{}' has not been declared", name_string),
+            })
+        }
+    }
+}
+
+fn open_file(
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+    file_name: &Spanned<Expr>,
+    file_mode: &FileMode,
+    body: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let file_string = eval(file_name, ctx)?.to_string();
+    if ctx.open_files.contains_key(&file_string) {
+        return Err(Error {
+            span: expr.1.clone(),
+            msg: format!(
+                "File '{}' is already open, close it before reopening it",
+                file_string
+            ),
+        });
+    }
+
+    ctx.open_files.insert(file_string, file_mode.to_owned());
+    eval(body, ctx)
+}
+
+fn close_file(
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+    file_name: &Spanned<Expr>,
+    body: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let file_string = eval(file_name, ctx)?.to_string();
+    if !ctx.open_files.contains_key(&file_string) {
+        return Err(Error {
+            span: expr.1.clone(),
+            msg: format!("File '{}' isn't open, can't close the file", file_string),
+        });
+    }
+    ctx.open_files.remove(&file_string);
+    eval(body, ctx)
+}
+
 #[allow(unreachable_patterns)]
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
@@ -816,6 +942,14 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
             for_(ctx, start_expr, end, body, var, step, then, expr)?
         }
         Expr::Input(name, children, then) => input(ctx, name, children, then, expr)?,
+        Expr::WriteFile(file_name, data, body) => write_file(ctx, expr, file_name, data, body)?,
+        Expr::OpenFile(file_name, file_mode, body) => {
+            open_file(ctx, expr, file_name, file_mode, body)?
+        }
+        Expr::ReadFile(file_name, name, children, then) => {
+            read_file(ctx, expr, file_name, name, children, then)?
+        }
+        Expr::CloseFile(file_name, body) => close_file(ctx, expr, file_name, body)?,
         _ => {
             todo!()
         }
