@@ -374,7 +374,7 @@ fn output(val: &Vec<Spanned<Expr>>, then: &Spanned<Expr>, ctx: &mut Ctx) -> Resu
             .send(Actions::Output(format!("{out} ")))
             .unwrap();
     }
-    ctx.channel.send(Actions::Output("\n".to_string())).unwrap();
+    //ctx.channel.send(Actions::Output("\n".to_string())).unwrap();
     eval(then, ctx)
 }
 
@@ -807,7 +807,7 @@ fn write_file(
     let file_string = eval(file_name, ctx)?.to_string();
     let data = eval(data, ctx)?.to_string();
     let mode = ctx.open_files.get(&file_string);
-    if mode != Some(&FileMode::Write) || mode != Some(&FileMode::Append) {
+    if mode != Some(&FileMode::Write) && mode != Some(&FileMode::Append) {
         return Err(Error {
             span: expr.1.clone(),
             msg: format!(
@@ -884,7 +884,9 @@ fn open_file(
             ),
         });
     }
-
+    ctx.channel
+        .send(Actions::Open(file_string.clone(), file_mode.clone()))
+        .unwrap();
     ctx.open_files.insert(file_string, file_mode.to_owned());
     eval(body, ctx)
 }
