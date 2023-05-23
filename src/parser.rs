@@ -1,7 +1,4 @@
-use std::{
-    fmt::Display,
-    ops::Range,
-};
+use std::{fmt::Display, ops::Range};
 
 use crate::{
     eval::VarMap,

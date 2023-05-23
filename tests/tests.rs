@@ -135,7 +135,7 @@ fn test_function_primitives() {
         output_values.lock().unwrap().push(s);
     };
 
-    let interpreter = Interpreter::debug_stdout(code,output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(*output_values.lock().unwrap(), vec!["2 ", "\n", "2 ", "\n"]);
