@@ -8,7 +8,7 @@ fn test_primitives() {
     let output = |s: String| {
         output_values.lock().unwrap().push(s);
     };
-    let mut interpreter = Interpreter::debug_stdout(code, output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(
@@ -33,7 +33,7 @@ fn test_array_primitives() {
     let output = |s: String| {
         output_values.lock().unwrap().push(s);
     };
-    let mut interpreter = Interpreter::debug_stdout(code, output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(
@@ -103,7 +103,7 @@ fn test_array_composite() {
     let output = |s: String| {
         output_values.lock().unwrap().push(s);
     };
-    let mut interpreter = Interpreter::debug_stdout(code, output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(*output_values.lock().unwrap(), vec!["1 ", "\n"]);
@@ -117,7 +117,7 @@ fn test_byref_byval_procedure() {
         output_values.lock().unwrap().push(s);
     };
 
-    let mut interpreter = Interpreter::debug_stdout(code, output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(
@@ -135,7 +135,7 @@ fn test_function_primitives() {
         output_values.lock().unwrap().push(s);
     };
 
-    let mut interpreter = Interpreter::debug_stdout(code,output);
+    let interpreter = Interpreter::debug_stdout(code,output);
 
     assert!(interpreter.is_ok());
     assert_eq!(*output_values.lock().unwrap(), vec!["2 ", "\n", "2 ", "\n"]);
@@ -150,7 +150,7 @@ fn test_builtins() {
             output_values.lock().unwrap().push(s);
         }
     };
-    let mut interpreter = Interpreter::debug_stdout(code, output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(
@@ -173,7 +173,7 @@ fn test_while_loop() {
         }
     };
 
-    let mut interpreter = Interpreter::debug_stdout(code, output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(
@@ -193,7 +193,7 @@ fn test_for_loop() {
         }
     };
 
-    let mut interpreter = Interpreter::debug_stdout(code, output);
+    let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
     assert_eq!(

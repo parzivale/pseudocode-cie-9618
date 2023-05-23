@@ -1,7 +1,5 @@
 use std::{
     collections::HashMap,
-    fs::File,
-    io::{BufReader, BufWriter},
     sync::{mpsc::*, Arc, Mutex},
     thread,
 };

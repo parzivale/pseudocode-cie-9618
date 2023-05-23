@@ -1,10 +1,8 @@
 use std::{
-    clone,
     collections::HashMap,
-    error::Error,
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{self, BufReader, BufWriter, Read, Write},
-    path::{self, Path},
+    path::{Path},
     rc::Rc,
     sync::{
         mpsc::{channel, Receiver, RecvTimeoutError, Sender},

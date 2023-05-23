@@ -1,4 +1,4 @@
-use std::{env, error::Error, fs, io, io::BufRead};
+use std::{env, error::Error, fs};
 
 use ariadne::Source;
 use pseudocode::Interpreter;
