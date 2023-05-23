@@ -13,7 +13,7 @@ fn test_primitives() {
     assert!(interpreter.is_ok());
     assert_eq!(
         *output_values.lock().unwrap(),
-        vec!["1 ", "2 ", "hi there ", "a ", "true ", "\n"]
+        vec!["1 ", "2 ", "hi there ", "a ", "true "]
     );
 }
 
@@ -38,7 +38,7 @@ fn test_array_primitives() {
     assert!(interpreter.is_ok());
     assert_eq!(
         *output_values.lock().unwrap(),
-        vec!["1 ", "2 ", "hi there ", "a ", "true ", "\n"]
+        vec!["1 ", "2 ", "hi there ", "a ", "true "]
     );
 }
 
@@ -106,7 +106,7 @@ fn test_array_composite() {
     let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
-    assert_eq!(*output_values.lock().unwrap(), vec!["1 ", "\n"]);
+    assert_eq!(*output_values.lock().unwrap(), vec!["1 "]);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn test_byref_byval_procedure() {
     assert!(interpreter.is_ok());
     assert_eq!(
         *output_values.lock().unwrap(),
-        vec!["11 ", "\n", "11 ", "\n"]
+        vec!["11 ", "11 "]
     );
 }
 
@@ -138,7 +138,7 @@ fn test_function_primitives() {
     let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
-    assert_eq!(*output_values.lock().unwrap(), vec!["2 ", "\n", "2 ", "\n"]);
+    assert_eq!(*output_values.lock().unwrap(), vec!["2 ", "2 "]);
 }
 
 #[test]

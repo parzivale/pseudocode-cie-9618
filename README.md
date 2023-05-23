@@ -17,8 +17,6 @@ To use as a standalone binary(precompiled binaries are only available for window
 pseudocode.exe path/to/your/code.pseudo
 ```
 
-
-
 ### When compiling from source
 
 To run with the parse tree and abstract syntax tree shown run in dev mode
