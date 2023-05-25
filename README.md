@@ -4,8 +4,17 @@ An implementation of the CIE 9618 pseudocode spec, designed with [this reference
 
 ## Usage
 
+To run an example
+
+```bash
+cargo run --example factorial
+```
+
+To use as a standalone binary(precompiled binaries are only available for windows atm)
+
 ```powershell
-pseucode_interpreter.exe "yourfile.pseudo"
+# The file extension does not matter
+pseudocode.exe path/to/your/code.pseudo
 ```
 
 ### When compiling from source
