@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
-    io,
+    fs::{self, OpenOptions},
+    io::{self, BufReader, BufWriter, Write},
+    path::Path,
     rc::Rc,
     sync::{
         mpsc::{channel, Receiver, RecvTimeoutError, Sender},
@@ -28,30 +30,58 @@ pub use prelude::*;
 pub enum Actions {
     Output(String),
     Input,
+    Open(String, FileMode),
+    Read(String),
+    Write(String, String),
+    Append(String, String),
 }
+
+#[derive(Debug)]
+pub enum FileBuf<T: Write> {
+    Write(BufWriter<T>),
+    Read(BufReader<T>),
+}
+
+type WriterRef = Rc<Mutex<BufWriter<Box<dyn Write>>>>;
+type ReaderRef = Rc<Mutex<Box<dyn BufRead>>>;
+
 #[derive(Clone)]
-pub struct Interpreter<I, O> {
+pub struct Interpreter<I, O, R, A, W> {
     pub input: I,
     pub output: O,
+    pub get_reader: R,
+    pub get_appender: A,
+    pub get_writer: W,
     pub reciver: Rc<Receiver<Actions>>,
     pub sender: Sender<Actions>,
     pub input_buffer: Arc<Mutex<String>>,
+    pub file_buffer: Arc<Mutex<String>>,
+    pub open_read_files: HashMap<String, ReaderRef>,
+    pub open_write_files: HashMap<String, WriterRef>,
 }
 
-impl<I, O> Interpreter<I, O>
+impl<I, O, R, A, W> Interpreter<I, O, R, A, W>
 where
-    I: FnOnce(&mut String) -> Result<(), io::Error> + Clone,
-    O: FnOnce(String) + Clone,
+    I: Fn(&mut String) -> Result<(), io::Error> + Clone,
+    O: Fn(String) + Clone,
+    R: Fn(String) -> Result<ReaderRef, io::Error> + Clone,
+    A: Fn(String) -> Result<WriterRef, io::Error> + Clone,
+    W: Fn(String) -> Result<WriterRef, io::Error> + Clone,
 {
-    pub fn new(input: I, output: O) -> Self {
+    pub fn new(input: I, output: O, get_reader: R, get_appender: A, get_writer: W) -> Self {
         let (sender, reciver) = channel();
-
         Self {
             input,
             output,
+            get_reader,
+            get_appender,
+            get_writer,
             reciver: Rc::new(reciver),
             sender,
             input_buffer: Arc::new(Mutex::new("".to_string())),
+            file_buffer: Arc::new(Mutex::new("".to_string())),
+            open_read_files: HashMap::new(),
+            open_write_files: HashMap::new(),
         }
     }
 
@@ -209,6 +239,7 @@ where
                 let mut ctx = Ctx::new();
                 ctx.types = types;
                 ctx.input = Arc::clone(&self.input_buffer);
+                ctx.file_read = Arc::clone(&self.file_buffer);
                 ctx.channel = self.sender.clone();
                 let interpreter = thread::spawn(move || eval(&ast, &mut ctx));
 
@@ -226,6 +257,62 @@ where
                             } else {
                                 interpreter.thread().unpark();
                             }
+                        }
+                        Ok(Actions::Open(file, mode)) => match mode {
+                            FileMode::Read => match (self.get_reader.clone())(file.clone()) {
+                                Ok(reader) => {
+                                    self.open_read_files.insert(file, reader);
+                                }
+                                Err(err) => {
+                                    errs.push(Simple::custom(0..0, err.to_string()));
+                                }
+                            },
+                            FileMode::Append => match (self.get_appender.clone())(file.clone()) {
+                                Ok(writer) => {
+                                    self.open_write_files.insert(file, writer);
+                                }
+                                Err(err) => {
+                                    errs.push(Simple::custom(0..0, err.to_string()));
+                                }
+                            },
+                            FileMode::Write => match (self.get_writer.clone())(file.clone()) {
+                                Ok(writer) => {
+                                    self.open_write_files.insert(file, writer);
+                                }
+                                Err(err) => {
+                                    errs.push(Simple::custom(0..0, err.to_string()));
+                                }
+                            },
+                        },
+                        Ok(Actions::Read(file)) => {
+                            self.open_read_files
+                                .get(&file)
+                                .unwrap()
+                                .lock()
+                                .unwrap()
+                                .read_line(&mut self.file_buffer.lock().unwrap())
+                                .unwrap();
+                            interpreter.thread().unpark();
+                        }
+                        Ok(Actions::Append(file, data)) => {
+                            self.open_write_files
+                                .get(&file)
+                                .unwrap()
+                                .lock()
+                                .unwrap()
+                                .write_all(data.as_bytes())
+                                .unwrap();
+                            interpreter.thread().unpark();
+                        }
+                        Ok(Actions::Write(file, data)) => {
+                            self.open_write_files
+                                .get(&file)
+                                .unwrap()
+                                .lock()
+                                .unwrap()
+                                .write_all(data.as_bytes())
+                                .unwrap();
+                            interpreter.thread().unpark();
                         }
                         Err(RecvTimeoutError::Timeout) => {
                             if interpreter.is_finished() {
@@ -328,5 +415,91 @@ where
         } else {
             Ok(())
         }
+    }
+}
+
+impl<X>
+    Interpreter<
+        fn(&mut String) -> Result<(), io::Error>,
+        X,
+        fn(String) -> Result<ReaderRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+    >
+where
+    X: Fn(String) + Clone,
+{
+    pub fn debug_stdout(test: String, output: X) -> Result<(), Vec<ariadne::Report>> {
+        let input = |s: &mut String| -> Result<(), io::Error> {
+            let stdin = io::stdin();
+            let mut buf = String::new();
+            stdin.read_line(&mut buf)?;
+            *s = buf;
+            Ok(())
+        };
+
+        let reader = |f: String| -> Result<ReaderRef, io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::open(path)?;
+            Ok(Rc::new(Mutex::new(Box::new(BufReader::new(file)))))
+        };
+
+        let writer = |f: String| -> Result<WriterRef, io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::create(path)?;
+            Ok(Rc::new(Mutex::new(BufWriter::new(Box::new(file)))))
+        };
+
+        let appender = |f: String| -> Result<WriterRef, io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::open(path)?;
+            Ok(Rc::new(Mutex::new(BufWriter::new(Box::new(file)))))
+        };
+
+        Self::new(input, output, reader, appender, writer).interpret(test)
+    }
+}
+
+impl Default
+    for Interpreter<
+        fn(&mut String) -> Result<(), io::Error>,
+        fn(String),
+        fn(String) -> Result<ReaderRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+    >
+{
+    fn default() -> Self {
+        let input = |s: &mut String| -> Result<(), io::Error> {
+            let stdin = io::stdin();
+            let mut buf = String::new();
+            stdin.read_line(&mut buf)?;
+            *s = buf;
+            Ok(())
+        };
+
+        let output = |s: String| {
+            println!("{}", s);
+        };
+
+        let reader = |f: String| -> Result<ReaderRef, io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::open(path)?;
+            Ok(Rc::new(Mutex::new(Box::new(BufReader::new(file)))))
+        };
+
+        let writer = |f: String| -> Result<WriterRef, io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::create(path)?;
+            Ok(Rc::new(Mutex::new(BufWriter::new(Box::new(file)))))
+        };
+
+        let appender = |f: String| -> Result<WriterRef, io::Error> {
+            let path = Path::new(&f);
+            let file = OpenOptions::new().append(true).open(path)?;
+            Ok(Rc::new(Mutex::new(BufWriter::new(Box::new(file)))))
+        };
+
+        Interpreter::new(input, output, reader, appender, writer)
     }
 }

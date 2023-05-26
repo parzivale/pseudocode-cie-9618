@@ -1,6 +1,7 @@
-use std::{collections::HashMap, fmt::Display, ops::Range};
+use std::{fmt::Display, ops::Range};
 
 use crate::{
+    eval::VarMap,
     lexer::{Delim, Token},
     prelude::*,
 };
@@ -13,8 +14,8 @@ pub enum Value {
     Real(f32),
     Str(String),
     Char(char),
-    Comp(HashMap<String, (String, Option<Value>)>),
-    Arr(HashMap<String, (String, Option<Value>)>),
+    Comp(VarMap),
+    Arr(VarMap),
     Func(String),
     Builtin(String),
     Return(Box<Self>),
@@ -53,6 +54,13 @@ pub enum BinaryOp {
 pub enum ArgMode {
     Byref,
     Byval,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileMode {
+    Read,
+    Write,
+    Append,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +112,15 @@ pub enum Expr {
     While(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     Output(Vec<Spanned<Self>>, Box<Spanned<Self>>),
     Input(Box<Spanned<Self>>, Vec<Spanned<Self>>, Box<Spanned<Self>>),
+    OpenFile(Box<Spanned<Self>>, FileMode, Box<Spanned<Self>>),
+    CloseFile(Box<Spanned<Self>>, Box<Spanned<Self>>),
+    WriteFile(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
+    ReadFile(
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+        Vec<Spanned<Self>>,
+        Box<Spanned<Self>>,
+    ),
 }
 
 pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
@@ -595,6 +612,103 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
                 })
         });
 
+        let open_file = just(Token::Keyword("OPENFILE".to_string()))
+            .ignore_then(raw_expr.clone())
+            .then_ignore(just(Token::Keyword("FOR".to_string())))
+            .then(one_of::<_, _, Simple<Token>>(vec![
+                Token::Keyword("READ".to_string()),
+                Token::Keyword("WRITE".to_string()),
+                Token::Keyword("APPEND".to_string()),
+            ]))
+            .then(expr.clone().or_not())
+            .map_with_span(|((file_name, file_mode), body), span| {
+                (
+                    Expr::OpenFile(
+                        Box::new(file_name),
+                        match file_mode {
+                            Token::Keyword(type_) => match type_.as_str() {
+                                "READ" => FileMode::Read,
+                                "WRITE" => FileMode::Write,
+                                "APPEND" => FileMode::Append,
+                                _ => FileMode::Read,
+                            },
+                            _ => FileMode::Read,
+                        },
+                        Box::new(match body {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span.clone()),
+                        }),
+                    ),
+                    span,
+                )
+            });
+
+        let close_file = just(Token::Keyword("OPENFILE".to_string()))
+            .ignore_then(raw_expr.clone())
+            .then(expr.clone().or_not())
+            .map_with_span(|(file_name, body), span| {
+                (
+                    Expr::CloseFile(
+                        Box::new(file_name),
+                        Box::new(match body {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span.clone()),
+                        }),
+                    ),
+                    span,
+                )
+            });
+
+        let write_file = just(Token::Keyword("WRITEFILE".to_string()))
+            .ignore_then(raw_expr.clone())
+            .then_ignore(just(Token::Ctrl(',')))
+            .then(raw_expr.clone())
+            .then(expr.clone().or_not())
+            .map_with_span(|((file_name, data), body), span| {
+                (
+                    Expr::WriteFile(
+                        Box::new(file_name),
+                        Box::new(data),
+                        Box::new(match body {
+                            Some(t) => t,
+                            None => (Expr::Value(Value::Null), span.clone()),
+                        }),
+                    ),
+                    span,
+                )
+            });
+
+        let read_file = just(Token::Keyword("READFILE".to_string()))
+            .ignore_then(raw_expr.clone())
+            .then_ignore(just(Token::Ctrl(',')))
+            .then(ident)
+            .then(
+                just(Token::Ctrl('.'))
+                    .ignore_then(
+                        ident.map_with_span(|ident, span| (Expr::Value(Value::Str(ident)), span)),
+                    )
+                    .or(raw_expr
+                        .clone()
+                        .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']'))))
+                    .repeated(),
+            )
+            .then(expr.clone().or_not())
+            .map_with_span(|(((file_name, name), children), body), span: Span| {
+                let body = match body {
+                    Some(t) => t,
+                    None => (Expr::Value(Value::Null), span.clone()),
+                };
+                (
+                    Expr::ReadFile(
+                        Box::new(file_name),
+                        Box::new((Expr::Value(Value::Str(name)), span.clone())),
+                        children,
+                        Box::new(body),
+                    ),
+                    span,
+                )
+            });
+
         if_.or(function)
             .or(procedure)
             .or(call_procedure)
@@ -607,6 +721,10 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(declare_arr)
             .or(declare_prim)
             .or(return_)
+            .or(open_file)
+            .or(write_file)
+            .or(read_file)
+            .or(close_file)
             .labelled("block")
     })
     .then_ignore(end())
