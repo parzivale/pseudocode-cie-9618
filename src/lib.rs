@@ -42,8 +42,125 @@ pub enum FileBuf<T: Write> {
     Read(BufReader<T>),
 }
 
-type WriterRef = Rc<Mutex<BufWriter<Box<dyn Write>>>>;
-type ReaderRef = Rc<Mutex<Box<dyn BufRead>>>;
+pub type WriterRef = Rc<Mutex<BufWriter<Box<dyn Write>>>>;
+pub type ReaderRef = Rc<Mutex<Box<dyn BufRead>>>;
+
+#[derive(Clone)]
+pub struct InterpreterBuilder<I, O, R, A, W> {
+    pub input: Option<I>,
+    pub output: Option<O>,
+    pub get_reader: Option<R>,
+    pub get_appender: Option<A>,
+    pub get_writer: Option<W>,
+}
+
+impl<I, O, R, A, W> Default for InterpreterBuilder<I, O, R, A, W> {
+    fn default() -> Self {
+        Self {
+            input: None,
+            output: None,
+            get_reader: None,
+            get_appender: None,
+            get_writer: None,
+        }
+    }
+}
+
+impl<I, O, R, A, W> InterpreterBuilder<I, O, R, A, W>
+where
+    I: Fn(&mut String) -> Result<(), io::Error> + Clone,
+    O: Fn(String) + Clone,
+    R: Fn(String) -> Result<ReaderRef, io::Error> + Clone,
+    A: Fn(String) -> Result<WriterRef, io::Error> + Clone,
+    W: Fn(String) -> Result<WriterRef, io::Error> + Clone,
+{
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn input(&mut self, input: I) -> &mut Self {
+        self.input = Some(input);
+        self
+    }
+
+    pub fn output(&mut self, output: O) -> &mut Self {
+        self.output = Some(output);
+        self
+    }
+
+    pub fn get_appender(&mut self, get_appender: A) -> &mut Self {
+        self.get_appender = Some(get_appender);
+        self
+    }
+
+    pub fn get_reader(&mut self, get_reader: R) -> &mut Self {
+        self.get_reader = Some(get_reader);
+        self
+    }
+
+    pub fn get_writer(&mut self, get_writer: W) -> &mut Self {
+        self.get_writer = Some(get_writer);
+        self
+    }
+}
+
+impl
+    InterpreterBuilder<
+        fn(&mut String) -> Result<(), io::Error>,
+        fn(String),
+        fn(String) -> Result<ReaderRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+    >
+{
+    pub fn build(
+        self,
+    ) -> Interpreter<
+        fn(&mut String) -> Result<(), io::Error>,
+        fn(String),
+        fn(String) -> Result<ReaderRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+        fn(String) -> Result<WriterRef, io::Error>,
+    > {
+        let input = |s: &mut String| -> Result<(), io::Error> {
+            let stdin = io::stdin();
+            let mut buf = String::new();
+            stdin.read_line(&mut buf)?;
+            *s = buf;
+            Ok(())
+        };
+
+        let output = |s: String| {
+            println!("{}", s);
+        };
+
+        let reader = |f: String| -> Result<ReaderRef, io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::open(path)?;
+            Ok(Rc::new(Mutex::new(Box::new(BufReader::new(file)))))
+        };
+
+        let writer = |f: String| -> Result<WriterRef, io::Error> {
+            let path = Path::new(&f);
+            let file = fs::File::create(path)?;
+            Ok(Rc::new(Mutex::new(BufWriter::new(Box::new(file)))))
+        };
+
+        let appender = |f: String| -> Result<WriterRef, io::Error> {
+            let path = Path::new(&f);
+            let file = OpenOptions::new().append(true).open(path)?;
+            Ok(Rc::new(Mutex::new(BufWriter::new(Box::new(file)))))
+        };
+
+        Interpreter::new(
+            self.input.unwrap_or(input),
+            self.output.unwrap_or(output),
+            self.get_reader.unwrap_or(reader),
+            self.get_appender.unwrap_or(appender),
+            self.get_writer.unwrap_or(writer),
+        )
+    }
+}
 
 #[derive(Clone)]
 pub struct Interpreter<I, O, R, A, W> {

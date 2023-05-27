@@ -120,10 +120,7 @@ fn test_byref_byval_procedure() {
     let interpreter = Interpreter::debug_stdout(code, output);
 
     assert!(interpreter.is_ok());
-    assert_eq!(
-        *output_values.lock().unwrap(),
-        vec!["11 ", "11 "]
-    );
+    assert_eq!(*output_values.lock().unwrap(), vec!["11 ", "11 "]);
 }
 
 #[test]
