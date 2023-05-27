@@ -113,6 +113,7 @@ impl
         fn(String) -> Result<WriterRef, io::Error>,
     >
 {
+    #[allow(clippy::type_complexity)]
     pub fn build(
         self,
     ) -> Interpreter<
