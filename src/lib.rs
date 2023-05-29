@@ -6,12 +6,21 @@ use std::{
         mpsc::{channel, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
-    thread,
     time::Duration,
 };
+#[cfg(feature = "wasm")]
+pub use wasm_bindgen;
+
+#[cfg(not(feature = "wasm"))]
+use std::thread::spawn;
+
+
+
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind};
 
+#[cfg(feature = "wasm")]
+mod js_glue;
 mod bin_ops;
 mod builtins;
 mod eval;
@@ -25,6 +34,11 @@ use interpreter_io::{InterpreterIO, ReaderRef, WriterRef};
 use lexer::*;
 use parser::*;
 pub use prelude::*;
+
+#[cfg(feature = "wasm")]
+pub use spawn;
+#[cfg(feature = "wasm")]
+pub use unpark;
 
 #[derive(Clone, Debug)]
 pub enum Actions {
@@ -223,7 +237,11 @@ impl<A: InterpreterIO> Interpreter<A> {
                 ctx.input = Arc::clone(&self.input_buffer);
                 ctx.file_read = Arc::clone(&self.file_buffer);
                 ctx.channel = self.sender.clone();
-                let interpreter = thread::spawn(move || eval(&ast, &mut ctx));
+
+                let interpreter  = spawn(move || eval(&ast, &mut ctx));
+
+                #[cfg(feature = "wasm")]
+                let (park_send, park_recv) = channel();
 
                 'top: loop {
                     match self.reciver.recv_timeout(Duration::from_millis(10)) {

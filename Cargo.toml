@@ -8,3 +8,9 @@ edition = "2021"
 [dependencies]
 ariadne = "0.2.0"
 chumsky = { git = "https://github.com/zesterer/chumsky", rev = "2d971c6" }
+wasm-bindgen = { version = "0.2.86", optional = true }
+web-sys = { version = "0.3.63", optional = true, features = ["Worker"] }
+
+
+[features]
+wasm = ["wasm-bindgen", "web-sys"]
