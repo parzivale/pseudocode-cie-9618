@@ -1,3 +1,4 @@
+pub use crate::interpreter_io::InterpreterIO;
 pub use crate::{utils::*, Actions};
 pub use chumsky::{error::Cheap, prelude::*, stream::Stream, BoxStream, Flat};
 
