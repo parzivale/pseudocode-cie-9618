@@ -203,7 +203,7 @@ where
         }
     }
 
-    pub fn interpret(&mut self, code: String) -> Result<(), Vec<ariadne::Report>> {
+    pub fn interpret<'a>(&mut self, code: String) -> Result<(), Vec<ariadne::Report<'a>>> {
         // chumksy doesnt like newlines in a nested statement, this is to handle that
         let code = code
             .lines()
@@ -547,7 +547,7 @@ impl<X>
 where
     X: Fn(String) + Clone,
 {
-    pub fn debug_stdout(test: String, output: X) -> Result<(), Vec<ariadne::Report>> {
+    pub fn debug_stdout<'a>(test: String, output: X) -> Result<(), Vec<ariadne::Report<'a>>> {
         let input = |s: &mut String| -> Result<(), io::Error> {
             let stdin = io::stdin();
             let mut buf = String::new();
@@ -573,7 +573,6 @@ where
             let file = fs::File::open(path)?;
             Ok(Rc::new(Mutex::new(BufWriter::new(Box::new(file)))))
         };
-
         Self::new(input, output, reader, appender, writer).interpret(test)
     }
 }
