@@ -259,6 +259,7 @@ pub fn update_comp_vars(
         let mut map = rhs;
         let comb = maps.iter().rev().zip(children.iter().rev());
         for (i, index) in comb {
+            #[cfg(not(feature = "wasm"))]
             let mut temp_ctx = Ctx {
                 vars: ctx.vars.clone(),
                 types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
@@ -267,6 +268,18 @@ pub fn update_comp_vars(
                 input: Arc::clone(&ctx.input),
                 file_read: Arc::clone(&ctx.file_read),
                 open_files: HashMap::new(),
+            };
+
+            #[cfg(feature = "wasm")]
+            let mut temp_ctx = Ctx {
+                vars: ctx.vars.clone(),
+                types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
+                local_vars: ctx.local_vars.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
+                parked: Arc::clone(&ctx.parked),
             };
             let index = eval(index, &mut temp_ctx)?;
             match index {
@@ -438,6 +451,7 @@ pub fn type_check_comp(
     name: &String,
 ) -> Result<HashMap<String, String>, Error> {
     for i in children {
+        #[cfg(not(feature = "wasm"))]
         let mut temp_ctx = Ctx {
             vars: ctx.vars.clone(),
             local_vars: ctx.local_vars.clone(),
@@ -446,6 +460,18 @@ pub fn type_check_comp(
             input: Arc::clone(&ctx.input),
             file_read: Arc::clone(&ctx.file_read),
             open_files: HashMap::new(),
+        };
+
+        #[cfg(feature = "wasm")]
+        let mut temp_ctx = Ctx {
+            vars: ctx.vars.clone(),
+            local_vars: ctx.local_vars.clone(),
+            types: to_type_map(temp_types.clone(), &mut ctx.types, expr)?,
+            channel: ctx.channel.clone(),
+            input: Arc::clone(&ctx.input),
+            file_read: Arc::clone(&ctx.file_read),
+            open_files: HashMap::new(),
+            parked: Arc::clone(&ctx.parked),
         };
 
         let i = eval(i, &mut temp_ctx)?;

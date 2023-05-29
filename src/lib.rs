@@ -1,8 +1,10 @@
 use std::{
     collections::HashMap,
+    fmt::format,
     io::{BufReader, BufWriter, Write},
     rc::Rc,
     sync::{
+        atomic::AtomicBool,
         mpsc::{channel, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
@@ -10,21 +12,20 @@ use std::{
 };
 #[cfg(feature = "wasm")]
 pub use wasm_bindgen;
+use wasm_bindgen::JsValue;
+use web_sys::console;
 
 #[cfg(not(feature = "wasm"))]
 use std::thread::spawn;
 
-
-
-
 use ariadne::{Color, Fmt, Label, Report, ReportKind};
 
-#[cfg(feature = "wasm")]
-mod js_glue;
 mod bin_ops;
 mod builtins;
 mod eval;
 mod interpreter_io;
+#[cfg(feature = "wasm")]
+mod js_glue;
 mod lexer;
 mod parser;
 pub mod prelude;
@@ -36,9 +37,9 @@ use parser::*;
 pub use prelude::*;
 
 #[cfg(feature = "wasm")]
-pub use spawn;
+pub use crate::js_glue::spawn;
 #[cfg(feature = "wasm")]
-pub use unpark;
+pub use crate::js_glue::unpark;
 
 #[derive(Clone, Debug)]
 pub enum Actions {
@@ -238,19 +239,40 @@ impl<A: InterpreterIO> Interpreter<A> {
                 ctx.file_read = Arc::clone(&self.file_buffer);
                 ctx.channel = self.sender.clone();
 
-                let interpreter  = spawn(move || eval(&ast, &mut ctx));
+                #[cfg(feature = "wasm")]
+                let parked;
+                #[cfg(feature = "wasm")]
+                {
+                    parked = Arc::new(AtomicBool::new(false));
+                    ctx.parked = Arc::clone(&parked);
+                }
+
+                #[cfg(not(feature = "wasm"))]
+                let interpreter = spawn(move || eval(&ast, &mut ctx));
+
+                console::log_1(&JsValue::from(format!("{:?}", ast)));
 
                 #[cfg(feature = "wasm")]
-                let (park_send, park_recv) = channel();
+                let interpreter = spawn(move || {
+                    console::log_1(&JsValue::from("new thread spawned"));
+                    eval(&ast, &mut ctx);
+                });
 
                 'top: loop {
+                    #[cfg(not(feature = "wasm"))]
                     match self.reciver.recv_timeout(Duration::from_millis(10)) {
                         Ok(Actions::Output(s)) => {
                             if let Err(err) = self.io.lock().unwrap().output(s) {
                                 errs.push(Simple::custom(0..0, err.to_string()));
+                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
                             } else {
+                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
                             }
                         }
                         Ok(Actions::Input) => {
@@ -261,9 +283,15 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .input(&mut self.input_buffer.lock().unwrap())
                             {
                                 errs.push(Simple::custom(0..0, err.to_string()));
+                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
                             } else {
+                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
                             }
                         }
                         Ok(Actions::Open(file, mode)) => match mode {
@@ -306,7 +334,10 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .read_line(&mut self.file_buffer.lock().unwrap())
                                 .unwrap();
+                            #[cfg(not(feature = "wasm"))]
                             interpreter.thread().unpark();
+                            #[cfg(feature = "wasm")]
+                            unpark(Arc::clone(&parked))
                         }
                         Ok(Actions::Append(file, data)) => {
                             self.open_write_files
@@ -316,7 +347,10 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .write_all(data.as_bytes())
                                 .unwrap();
+                            #[cfg(not(feature = "wasm"))]
                             interpreter.thread().unpark();
+                            #[cfg(feature = "wasm")]
+                            unpark(Arc::clone(&parked))
                         }
                         Ok(Actions::Write(file, data)) => {
                             self.open_write_files
@@ -326,9 +360,14 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .write_all(data.as_bytes())
                                 .unwrap();
+                            #[cfg(not(feature = "wasm"))]
                             interpreter.thread().unpark();
+                            #[cfg(feature = "wasm")]
+                            unpark(Arc::clone(&parked))
                         }
-                        Err(RecvTimeoutError::Timeout) => {
+                        Err(RecvTimeoutError::Timeout) =>
+                        {
+                            #[cfg(not(feature = "wasm"))]
                             if interpreter.is_finished() {
                                 break 'top;
                             }
@@ -338,9 +377,125 @@ impl<A: InterpreterIO> Interpreter<A> {
                             break 'top;
                         }
                     }
+                    #[cfg(feature = "wasm")]
+                    match self.reciver.try_recv() {
+                        Ok(Actions::Output(s)) => {
+                            if let Err(err) = self.io.lock().unwrap().output(s) {
+                                errs.push(Simple::custom(0..0, err.to_string()));
+                                #[cfg(not(feature = "wasm"))]
+                                interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
+                            } else {
+                                #[cfg(not(feature = "wasm"))]
+                                interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
+                            }
+                        }
+                        Ok(Actions::Input) => {
+                            if let Err(err) = self
+                                .io
+                                .lock()
+                                .unwrap()
+                                .input(&mut self.input_buffer.lock().unwrap())
+                            {
+                                errs.push(Simple::custom(0..0, err.to_string()));
+                                #[cfg(not(feature = "wasm"))]
+                                interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
+                            } else {
+                                #[cfg(not(feature = "wasm"))]
+                                interpreter.thread().unpark();
+                                #[cfg(feature = "wasm")]
+                                unpark(Arc::clone(&parked))
+                            }
+                        }
+                        Ok(Actions::Open(file, mode)) => match mode {
+                            FileMode::Read => {
+                                match self.io.lock().unwrap().get_reader(file.clone()) {
+                                    Ok(reader) => {
+                                        self.open_read_files.insert(file, reader);
+                                    }
+                                    Err(err) => {
+                                        errs.push(Simple::custom(0..0, err.to_string()));
+                                    }
+                                }
+                            }
+                            FileMode::Append => {
+                                match self.io.lock().unwrap().get_appender(file.clone()) {
+                                    Ok(writer) => {
+                                        self.open_write_files.insert(file, writer);
+                                    }
+                                    Err(err) => {
+                                        errs.push(Simple::custom(0..0, err.to_string()));
+                                    }
+                                }
+                            }
+                            FileMode::Write => {
+                                match self.io.lock().unwrap().get_writer(file.clone()) {
+                                    Ok(writer) => {
+                                        self.open_write_files.insert(file, writer);
+                                    }
+                                    Err(err) => {
+                                        errs.push(Simple::custom(0..0, err.to_string()));
+                                    }
+                                }
+                            }
+                        },
+                        Ok(Actions::Read(file)) => {
+                            self.open_read_files
+                                .get(&file)
+                                .unwrap()
+                                .lock()
+                                .unwrap()
+                                .read_line(&mut self.file_buffer.lock().unwrap())
+                                .unwrap();
+                            #[cfg(not(feature = "wasm"))]
+                            interpreter.thread().unpark();
+                            #[cfg(feature = "wasm")]
+                            unpark(Arc::clone(&parked))
+                        }
+                        Ok(Actions::Append(file, data)) => {
+                            self.open_write_files
+                                .get(&file)
+                                .unwrap()
+                                .lock()
+                                .unwrap()
+                                .write_all(data.as_bytes())
+                                .unwrap();
+                            #[cfg(not(feature = "wasm"))]
+                            interpreter.thread().unpark();
+                            #[cfg(feature = "wasm")]
+                            unpark(Arc::clone(&parked))
+                        }
+                        Ok(Actions::Write(file, data)) => {
+                            self.open_write_files
+                                .get(&file)
+                                .unwrap()
+                                .lock()
+                                .unwrap()
+                                .write_all(data.as_bytes())
+                                .unwrap();
+                            #[cfg(not(feature = "wasm"))]
+                            interpreter.thread().unpark();
+                            #[cfg(feature = "wasm")]
+                            unpark(Arc::clone(&parked))
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            console::log_1(&JsValue::from_str(
+                                "dissconnected from the interpreter",
+                            ));
+                            break 'top;
+                        }
+                        _ => {}
+                    }
                 }
 
+                #[cfg(not(feature = "wasm"))]
                 let response = interpreter.join();
+                #[cfg(not(feature = "wasm"))]
                 match response {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => errs.push(Simple::custom(err.span, err.msg)),

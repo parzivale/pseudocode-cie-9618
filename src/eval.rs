@@ -1,8 +1,15 @@
 use std::{
     collections::HashMap,
     sync::{mpsc::*, Arc, Mutex},
-    thread,
 };
+
+#[cfg(not(feature = "wasm"))]
+use std::thread::park;
+
+#[cfg(feature = "wasm")]
+use crate::js_glue::park;
+#[cfg(feature = "wasm")]
+use std::sync::atomic::AtomicBool;
 
 use crate::{
     bin_ops::*,
@@ -102,6 +109,7 @@ pub struct Error {
 pub type VarMap = HashMap<String, (String, Option<Value>)>;
 pub type TypeMap = HashMap<String, Types>;
 
+#[cfg(not(feature = "wasm"))]
 pub struct Ctx {
     pub vars: VarMap,
     // This field should only ever be used by functions
@@ -117,6 +125,24 @@ pub struct Ctx {
     pub open_files: HashMap<String, FileMode>,
 }
 
+#[cfg(feature = "wasm")]
+pub struct Ctx {
+    pub vars: VarMap,
+    // This field should only ever be used by functions
+    // if you see this used somewhere else we are fucked
+    pub local_vars: VarMap,
+    pub types: TypeMap,
+    pub channel: Sender<Actions>,
+    // different mutexes for file and stdin data
+    // this is due to concerns of a data race
+    // might not be necessary
+    pub input: Arc<Mutex<String>>,
+    pub file_read: Arc<Mutex<String>>,
+    pub open_files: HashMap<String, FileMode>,
+    pub parked: Arc<AtomicBool>,
+}
+
+#[cfg(not(feature = "wasm"))]
 impl Ctx {
     pub fn new() -> Self {
         Self {
@@ -127,6 +153,22 @@ impl Ctx {
             input: Arc::new(Mutex::new("".to_string())),
             file_read: Arc::new(Mutex::new("".to_string())),
             open_files: HashMap::new(),
+        }
+    }
+}
+
+#[cfg(feature = "wasm")]
+impl Ctx {
+    pub fn new() -> Self {
+        Self {
+            vars: HashMap::new(),
+            local_vars: HashMap::new(),
+            types: HashMap::new(),
+            channel: channel().0,
+            input: Arc::new(Mutex::new("".to_string())),
+            file_read: Arc::new(Mutex::new("".to_string())),
+            open_files: HashMap::new(),
+            parked: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -191,6 +233,7 @@ fn comp_var(
         // we try the local scope first for raw values
         Value::Comp(h) => {
             //println!("{:?}\n{:?}", h, sub);
+            #[cfg(not(feature = "wasm"))]
             let mut ctx = Ctx {
                 vars: h,
                 local_vars: ctx.local_vars.clone(),
@@ -201,9 +244,22 @@ fn comp_var(
                 open_files: HashMap::new(),
             };
 
+            #[cfg(feature = "wasm")]
+            let mut ctx = Ctx {
+                vars: h,
+                local_vars: ctx.local_vars.clone(),
+                types: ctx.types.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
+                parked: Arc::clone(&ctx.parked),
+            };
+
             eval(sub, &mut ctx)?
         }
         Value::Arr(h) => {
+            #[cfg(not(feature = "wasm"))]
             let mut ctx_temp = Ctx {
                 vars: h,
                 local_vars: ctx.local_vars.clone(),
@@ -212,6 +268,18 @@ fn comp_var(
                 input: Arc::clone(&ctx.input),
                 file_read: Arc::clone(&ctx.file_read),
                 open_files: HashMap::new(),
+            };
+
+            #[cfg(feature = "wasm")]
+            let mut ctx_temp = Ctx {
+                vars: h,
+                local_vars: ctx.local_vars.clone(),
+                types: ctx.types.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
+                parked: Arc::clone(&ctx.parked),
             };
 
             eval(sub, &mut ctx_temp).or_else(|_| {
@@ -406,6 +474,7 @@ fn declare_comp(
     name: &str,
     body: &Spanned<Expr>,
 ) -> Result<Value, Error> {
+    #[cfg(not(feature = "wasm"))]
     let mut ctx_temp = Ctx {
         local_vars: ctx.local_vars.clone(),
         types: ctx.types.clone(),
@@ -414,6 +483,18 @@ fn declare_comp(
         input: Arc::clone(&ctx.input),
         file_read: Arc::clone(&ctx.file_read),
         open_files: ctx.open_files.clone(),
+    };
+
+    #[cfg(feature = "wasm")]
+    let mut ctx_temp = Ctx {
+        local_vars: ctx.local_vars.clone(),
+        types: ctx.types.clone(),
+        vars: HashMap::new(),
+        channel: ctx.channel.clone(),
+        input: Arc::clone(&ctx.input),
+        file_read: Arc::clone(&ctx.file_read),
+        open_files: ctx.open_files.clone(),
+        parked: Arc::clone(&ctx.parked),
     };
     eval(items, &mut ctx_temp)?;
     let mut map = HashMap::new();
@@ -524,7 +605,7 @@ fn call(
                     }
                 }
             }
-
+            #[cfg(not(feature = "wasm"))]
             let mut temp_ctx = Ctx {
                 vars: vars_func,
                 local_vars: ctx.local_vars.clone(),
@@ -533,6 +614,18 @@ fn call(
                 input: Arc::clone(&ctx.input),
                 file_read: Arc::clone(&ctx.file_read),
                 open_files: HashMap::new(),
+            };
+
+            #[cfg(feature = "wasm")]
+            let mut temp_ctx = Ctx {
+                vars: vars_func,
+                local_vars: ctx.local_vars.clone(),
+                types: ctx.types.clone(),
+                channel: ctx.channel.clone(),
+                input: Arc::clone(&ctx.input),
+                file_read: Arc::clone(&ctx.file_read),
+                open_files: HashMap::new(),
+                parked: Arc::clone(&ctx.parked),
             };
 
             let output = eval(&f.body, &mut temp_ctx);
@@ -769,6 +862,7 @@ fn for_(
     eval(then, ctx)
 }
 
+#[cfg(not(feature = "wasm"))]
 fn input(
     ctx: &mut Ctx,
     name: &Spanned<Expr>,
@@ -778,8 +872,8 @@ fn input(
 ) -> Result<Value, Error> {
     let name_string = eval(name, ctx)?.to_string();
     ctx.channel.send(Actions::Input).unwrap();
-    thread::park();
 
+    park();
     {
         let string = (*ctx.input.lock().unwrap()).trim().to_string();
         *ctx.input.lock().unwrap() = "".to_string();
@@ -795,6 +889,34 @@ fn input(
     }
 }
 
+#[cfg(feature = "wasm")]
+fn input(
+    ctx: &mut Ctx,
+    name: &Spanned<Expr>,
+    children: &[Spanned<Expr>],
+    then: &Spanned<Expr>,
+    expr: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let name_string = eval(name, ctx)?.to_string();
+    ctx.channel.send(Actions::Input).unwrap();
+
+    park(Arc::clone(&ctx.parked));
+    {
+        let string = (*ctx.input.lock().unwrap()).trim().to_string();
+        *ctx.input.lock().unwrap() = "".to_string();
+        if ctx.vars.get(&name_string).is_some() {
+            let rhs = (Expr::Value(Value::Str(string)), expr.1.clone());
+            assign(expr, ctx, name, &children.to_vec(), &rhs, then)
+        } else {
+            Err(Error {
+                span: expr.1.clone(),
+                msg: format!("Var '{}' has not been declared", name_string),
+            })
+        }
+    }
+}
+
+#[cfg(not(feature = "wasm"))]
 fn write_file(
     ctx: &mut Ctx,
     expr: &Spanned<Expr>,
@@ -824,10 +946,45 @@ fn write_file(
         _ => unreachable!(),
     };
 
-    thread::park();
+    park();
     eval(body, ctx)
 }
 
+#[cfg(feature = "wasm")]
+fn write_file(
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+    file_name: &Spanned<Expr>,
+    data: &Spanned<Expr>,
+    body: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let file_string = eval(file_name, ctx)?.to_string();
+    let data = eval(data, ctx)?.to_string();
+    let mode = ctx.open_files.get(&file_string);
+    if mode != Some(&FileMode::Write) && mode != Some(&FileMode::Append) {
+        return Err(Error {
+            span: expr.1.clone(),
+            msg: format!(
+                "File {} has either not been opened or is not available for write",
+                file_string
+            ),
+        });
+    }
+
+    match mode.unwrap() {
+        FileMode::Write => ctx.channel.send(Actions::Write(file_string, data)).unwrap(),
+        FileMode::Append => ctx
+            .channel
+            .send(Actions::Append(file_string, data))
+            .unwrap(),
+        _ => unreachable!(),
+    };
+
+    park(Arc::clone(&ctx.parked));
+    eval(body, ctx)
+}
+
+#[cfg(not(feature = "wasm"))]
 fn read_file(
     ctx: &mut Ctx,
     expr: &Spanned<Expr>,
@@ -848,7 +1005,45 @@ fn read_file(
     }
     let name_string = eval(name, ctx)?.to_string();
     ctx.channel.send(Actions::Read(file_string)).unwrap();
-    thread::park();
+    park();
+
+    {
+        let string = (*ctx.file_read.lock().unwrap()).trim().to_string();
+        *ctx.file_read.lock().unwrap() = "".to_string();
+        if ctx.vars.get(&name_string).is_some() {
+            let rhs = (Expr::Value(Value::Str(string)), expr.1.clone());
+            assign(expr, ctx, name, &children.to_vec(), &rhs, then)
+        } else {
+            Err(Error {
+                span: expr.1.clone(),
+                msg: format!("Var '{}' has not been declared", name_string),
+            })
+        }
+    }
+}
+
+#[cfg(feature = "wasm")]
+fn read_file(
+    ctx: &mut Ctx,
+    expr: &Spanned<Expr>,
+    file_name: &Spanned<Expr>,
+    name: &Spanned<Expr>,
+    children: &[Spanned<Expr>],
+    then: &Spanned<Expr>,
+) -> Result<Value, Error> {
+    let file_string = eval(file_name, ctx)?.to_string();
+    if ctx.open_files.get(&file_string) != Some(&FileMode::Read) {
+        return Err(Error {
+            span: expr.1.clone(),
+            msg: format!(
+                "File {} has either not been opened or is not available for read",
+                file_string
+            ),
+        });
+    }
+    let name_string = eval(name, ctx)?.to_string();
+    ctx.channel.send(Actions::Read(file_string)).unwrap();
+    park(Arc::clone(&ctx.parked));
 
     {
         let string = (*ctx.file_read.lock().unwrap()).trim().to_string();
@@ -906,8 +1101,64 @@ fn close_file(
     eval(body, ctx)
 }
 
+#[cfg(not(feature = "wasm"))]
 #[allow(unreachable_patterns)]
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
+    //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
+    Ok(match &expr.0 {
+        Expr::Error => unreachable!(),
+        Expr::Value(val) => val.clone(),
+        Expr::Var(name) => var(expr, ctx, name)?,
+        Expr::CompVar(name, sub) => comp_var(expr, ctx, name, sub)?,
+        Expr::DeclarePrim(name, type_, then) => declare_prim(ctx, name, type_, then)?,
+        Expr::Assign(name, children, rhs, then) => assign(expr, ctx, name, children, rhs, then)?,
+        Expr::Binary(a, BinaryOp::Add, b) => bin_add(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Eq, b) => Value::Bool(eval(a, ctx)? == eval(b, ctx)?),
+        Expr::Binary(a, BinaryOp::NotEq, b) => Value::Bool(eval(a, ctx)? != eval(b, ctx)?),
+        Expr::Binary(a, BinaryOp::Mul, b) => bin_mul(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Sub, b) => bin_sub(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Div, b) => bin_div(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Ge, b) => bin_ge(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Geq, b) => bin_geq(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Le, b) => bin_le(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Leq, b) => bin_leq(a, b, ctx, expr)?,
+        Expr::Binary(a, BinaryOp::Concat, b) => bin_concat(a, b, ctx, expr)?,
+        Expr::Output(val, then) => output(val, then, ctx)?,
+        Expr::If(cond, a, b, body) => if_(cond, a, b, body, ctx)?,
+        Expr::DeclareComp(name, items, body) => declare_comp(ctx, items, name, body)?,
+        Expr::Func(name, args, type_, body, then) => func(ctx, name, args, body, then, type_)?,
+        Expr::ProcCall(expr, then) => proc_call(ctx, expr, then)?,
+        Expr::Call(func_string, args) => call(ctx, func_string, args, expr)?,
+        Expr::Return(v) => Value::Return(Box::new(eval(v, ctx)?)),
+        Expr::DeclareArr(name, start, end, type_, then) => {
+            declare_arr(ctx, name, start, end, type_, then, expr)?
+        }
+        Expr::While(cond, body, then) => while_(ctx, cond, body, then)?,
+        Expr::For(start_expr, end, step, body, var, then) => {
+            for_(ctx, start_expr, end, body, var, step, then, expr)?
+        }
+        Expr::Input(name, children, then) => input(ctx, name, children, then, expr)?,
+        Expr::WriteFile(file_name, data, body) => write_file(ctx, expr, file_name, data, body)?,
+        Expr::OpenFile(file_name, file_mode, body) => {
+            open_file(ctx, expr, file_name, file_mode, body)?
+        }
+        Expr::ReadFile(file_name, name, children, then) => {
+            read_file(ctx, expr, file_name, name, children, then)?
+        }
+        Expr::CloseFile(file_name, body) => close_file(ctx, expr, file_name, body)?,
+        _ => {
+            todo!()
+        }
+    })
+}
+
+#[cfg(feature = "wasm")]
+#[allow(unreachable_patterns)]
+pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
+    use wasm_bindgen::JsValue;
+    use web_sys::console;
+
+    console::log_1(&JsValue::from("here"));
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
     Ok(match &expr.0 {
         Expr::Error => unreachable!(),
