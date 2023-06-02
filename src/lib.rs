@@ -1,19 +1,22 @@
 use std::{
     collections::HashMap,
-    fmt::format,
     io::{BufReader, BufWriter, Write},
     rc::Rc,
     sync::{
-        atomic::AtomicBool,
-        mpsc::{channel, Receiver, RecvTimeoutError, Sender},
+        mpsc::{channel, Receiver, Sender},
         Arc, Mutex,
     },
-    time::Duration,
 };
+#[cfg(not(feature = "wasm"))]
+use std::{time::Duration, sync::mpsc::RecvTimeoutError};
 #[cfg(feature = "wasm")]
 pub use wasm_bindgen;
+#[cfg(feature = "wasm")]
 use wasm_bindgen::JsValue;
+#[cfg(feature = "wasm")]
 use web_sys::console;
+#[cfg(feature = "wasm")]
+use std::sync::atomic::AtomicBool;
 
 #[cfg(not(feature = "wasm"))]
 use std::thread::spawn;
@@ -49,6 +52,7 @@ pub enum Actions {
     Read(String),
     Write(String, String),
     Append(String, String),
+    Finish,
 }
 
 #[derive(Debug)]
@@ -250,12 +254,9 @@ impl<A: InterpreterIO> Interpreter<A> {
                 #[cfg(not(feature = "wasm"))]
                 let interpreter = spawn(move || eval(&ast, &mut ctx));
 
-                console::log_1(&JsValue::from(format!("{:?}", ast)));
-
                 #[cfg(feature = "wasm")]
-                let interpreter = spawn(move || {
-                    console::log_1(&JsValue::from("new thread spawned"));
-                    eval(&ast, &mut ctx);
+                spawn(move || {
+                    eval(&ast, &mut ctx).unwrap();
                 });
 
                 'top: loop {
@@ -264,15 +265,9 @@ impl<A: InterpreterIO> Interpreter<A> {
                         Ok(Actions::Output(s)) => {
                             if let Err(err) = self.io.lock().unwrap().output(s) {
                                 errs.push(Simple::custom(0..0, err.to_string()));
-                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
-                                unpark(Arc::clone(&parked))
                             } else {
-                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
-                                unpark(Arc::clone(&parked))
                             }
                         }
                         Ok(Actions::Input) => {
@@ -283,15 +278,9 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .input(&mut self.input_buffer.lock().unwrap())
                             {
                                 errs.push(Simple::custom(0..0, err.to_string()));
-                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
-                                unpark(Arc::clone(&parked))
                             } else {
-                                #[cfg(not(feature = "wasm"))]
                                 interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
-                                unpark(Arc::clone(&parked))
                             }
                         }
                         Ok(Actions::Open(file, mode)) => match mode {
@@ -334,10 +323,7 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .read_line(&mut self.file_buffer.lock().unwrap())
                                 .unwrap();
-                            #[cfg(not(feature = "wasm"))]
                             interpreter.thread().unpark();
-                            #[cfg(feature = "wasm")]
-                            unpark(Arc::clone(&parked))
                         }
                         Ok(Actions::Append(file, data)) => {
                             self.open_write_files
@@ -347,10 +333,7 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .write_all(data.as_bytes())
                                 .unwrap();
-                            #[cfg(not(feature = "wasm"))]
                             interpreter.thread().unpark();
-                            #[cfg(feature = "wasm")]
-                            unpark(Arc::clone(&parked))
                         }
                         Ok(Actions::Write(file, data)) => {
                             self.open_write_files
@@ -360,14 +343,10 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .write_all(data.as_bytes())
                                 .unwrap();
-                            #[cfg(not(feature = "wasm"))]
                             interpreter.thread().unpark();
-                            #[cfg(feature = "wasm")]
-                            unpark(Arc::clone(&parked))
                         }
                         Err(RecvTimeoutError::Timeout) =>
                         {
-                            #[cfg(not(feature = "wasm"))]
                             if interpreter.is_finished() {
                                 break 'top;
                             }
@@ -378,19 +357,13 @@ impl<A: InterpreterIO> Interpreter<A> {
                         }
                     }
                     #[cfg(feature = "wasm")]
-                    match self.reciver.try_recv() {
+                    match self.reciver.recv() {
                         Ok(Actions::Output(s)) => {
+                            console::log_1(&JsValue::from_str(
+                                "recieved output signal",
+                            ));
                             if let Err(err) = self.io.lock().unwrap().output(s) {
                                 errs.push(Simple::custom(0..0, err.to_string()));
-                                #[cfg(not(feature = "wasm"))]
-                                interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
-                                unpark(Arc::clone(&parked))
-                            } else {
-                                #[cfg(not(feature = "wasm"))]
-                                interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
-                                unpark(Arc::clone(&parked))
                             }
                         }
                         Ok(Actions::Input) => {
@@ -401,14 +374,8 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .input(&mut self.input_buffer.lock().unwrap())
                             {
                                 errs.push(Simple::custom(0..0, err.to_string()));
-                                #[cfg(not(feature = "wasm"))]
-                                interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
                                 unpark(Arc::clone(&parked))
                             } else {
-                                #[cfg(not(feature = "wasm"))]
-                                interpreter.thread().unpark();
-                                #[cfg(feature = "wasm")]
                                 unpark(Arc::clone(&parked))
                             }
                         }
@@ -452,9 +419,6 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .read_line(&mut self.file_buffer.lock().unwrap())
                                 .unwrap();
-                            #[cfg(not(feature = "wasm"))]
-                            interpreter.thread().unpark();
-                            #[cfg(feature = "wasm")]
                             unpark(Arc::clone(&parked))
                         }
                         Ok(Actions::Append(file, data)) => {
@@ -465,9 +429,6 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .write_all(data.as_bytes())
                                 .unwrap();
-                            #[cfg(not(feature = "wasm"))]
-                            interpreter.thread().unpark();
-                            #[cfg(feature = "wasm")]
                             unpark(Arc::clone(&parked))
                         }
                         Ok(Actions::Write(file, data)) => {
@@ -478,18 +439,20 @@ impl<A: InterpreterIO> Interpreter<A> {
                                 .unwrap()
                                 .write_all(data.as_bytes())
                                 .unwrap();
-                            #[cfg(not(feature = "wasm"))]
-                            interpreter.thread().unpark();
-                            #[cfg(feature = "wasm")]
                             unpark(Arc::clone(&parked))
                         }
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        Ok(Actions::Finish) => {
+                            console::log_1(&JsValue::from_str(
+                                "recieved finished signal",
+                            ));
+                            break 'top;
+                        }
+                        Err(_) => {
                             console::log_1(&JsValue::from_str(
                                 "dissconnected from the interpreter",
                             ));
                             break 'top;
                         }
-                        _ => {}
                     }
                 }
 

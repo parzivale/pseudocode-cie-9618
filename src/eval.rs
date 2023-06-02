@@ -3,6 +3,9 @@ use std::{
     sync::{mpsc::*, Arc, Mutex},
 };
 
+#[cfg(feature = "wasm")]
+pub use wasm_bindgen;
+
 #[cfg(not(feature = "wasm"))]
 use std::thread::park;
 
@@ -1101,7 +1104,6 @@ fn close_file(
     eval(body, ctx)
 }
 
-#[cfg(not(feature = "wasm"))]
 #[allow(unreachable_patterns)]
 pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
     //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
@@ -1146,61 +1148,7 @@ pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
             read_file(ctx, expr, file_name, name, children, then)?
         }
         Expr::CloseFile(file_name, body) => close_file(ctx, expr, file_name, body)?,
-        _ => {
-            todo!()
-        }
-    })
-}
-
-#[cfg(feature = "wasm")]
-#[allow(unreachable_patterns)]
-pub fn eval(expr: &Spanned<Expr>, ctx: &mut Ctx) -> Result<Value, Error> {
-    use wasm_bindgen::JsValue;
-    use web_sys::console;
-
-    console::log_1(&JsValue::from("here"));
-    //println!("vars:{:?}\n\ntypes:{:?}\n", ctx.vars, ctx.types);
-    Ok(match &expr.0 {
-        Expr::Error => unreachable!(),
-        Expr::Value(val) => val.clone(),
-        Expr::Var(name) => var(expr, ctx, name)?,
-        Expr::CompVar(name, sub) => comp_var(expr, ctx, name, sub)?,
-        Expr::DeclarePrim(name, type_, then) => declare_prim(ctx, name, type_, then)?,
-        Expr::Assign(name, children, rhs, then) => assign(expr, ctx, name, children, rhs, then)?,
-        Expr::Binary(a, BinaryOp::Add, b) => bin_add(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Eq, b) => Value::Bool(eval(a, ctx)? == eval(b, ctx)?),
-        Expr::Binary(a, BinaryOp::NotEq, b) => Value::Bool(eval(a, ctx)? != eval(b, ctx)?),
-        Expr::Binary(a, BinaryOp::Mul, b) => bin_mul(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Sub, b) => bin_sub(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Div, b) => bin_div(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Ge, b) => bin_ge(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Geq, b) => bin_geq(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Le, b) => bin_le(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Leq, b) => bin_leq(a, b, ctx, expr)?,
-        Expr::Binary(a, BinaryOp::Concat, b) => bin_concat(a, b, ctx, expr)?,
-        Expr::Output(val, then) => output(val, then, ctx)?,
-        Expr::If(cond, a, b, body) => if_(cond, a, b, body, ctx)?,
-        Expr::DeclareComp(name, items, body) => declare_comp(ctx, items, name, body)?,
-        Expr::Func(name, args, type_, body, then) => func(ctx, name, args, body, then, type_)?,
-        Expr::ProcCall(expr, then) => proc_call(ctx, expr, then)?,
-        Expr::Call(func_string, args) => call(ctx, func_string, args, expr)?,
-        Expr::Return(v) => Value::Return(Box::new(eval(v, ctx)?)),
-        Expr::DeclareArr(name, start, end, type_, then) => {
-            declare_arr(ctx, name, start, end, type_, then, expr)?
-        }
-        Expr::While(cond, body, then) => while_(ctx, cond, body, then)?,
-        Expr::For(start_expr, end, step, body, var, then) => {
-            for_(ctx, start_expr, end, body, var, step, then, expr)?
-        }
-        Expr::Input(name, children, then) => input(ctx, name, children, then, expr)?,
-        Expr::WriteFile(file_name, data, body) => write_file(ctx, expr, file_name, data, body)?,
-        Expr::OpenFile(file_name, file_mode, body) => {
-            open_file(ctx, expr, file_name, file_mode, body)?
-        }
-        Expr::ReadFile(file_name, name, children, then) => {
-            read_file(ctx, expr, file_name, name, children, then)?
-        }
-        Expr::CloseFile(file_name, body) => close_file(ctx, expr, file_name, body)?,
+        Expr::Finish => {ctx.channel.send(Actions::Finish).unwrap(); Value::Null}
         _ => {
             todo!()
         }

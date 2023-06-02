@@ -121,6 +121,7 @@ pub enum Expr {
         Vec<Spanned<Self>>,
         Box<Spanned<Self>>,
     ),
+    Finish,
 }
 
 pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Clone {
@@ -725,7 +726,7 @@ pub fn parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token>> + Cl
             .or(write_file)
             .or(read_file)
             .or(close_file)
+            .or(end().to(Expr::Finish).map_with_span(|e, span| (e,span)))
             .labelled("block")
     })
-    .then_ignore(end())
 }

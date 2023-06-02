@@ -21,13 +21,10 @@ pub fn spawn(f: impl FnOnce() + Send + 'static) {
     // Send the worker a reference to our memory chunk, so it can initialize a wasm module
     // using the same memory.
     msg.push(&wasm_bindgen::memory());
-    console::log_1(&JsValue::from("memory shared"));
 
     // Also send the worker the address of the closure we want to execute.
     msg.push(&JsValue::from(ptr as u32));
     console::log_1(&worker.post_message(&msg).err().unwrap_or_default());
-    console::log_1(&JsValue::from("message posted"));
-
 }
 
 pub fn park(parked: Arc<AtomicBool>) {
@@ -43,7 +40,6 @@ pub fn unpark(parked: Arc<AtomicBool>) {
 // This function is here for `worker.js` to call.
 pub fn worker_entry_point(addr: u32) {
     #[cfg(feature = "wasm")]
-    console::log_1(&JsValue::from("asda"));
     // Interpret the address we were given as a pointer to a closure to call.
     let closure = unsafe { Box::from_raw(addr as *mut Box<dyn FnOnce()>) };
     (*closure)();
