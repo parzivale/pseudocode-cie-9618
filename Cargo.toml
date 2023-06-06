@@ -1,5 +1,5 @@
 [package]
-name = "pseudocode-cie-9618"
+name = "pseudocode_cie_9618"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,4 +10,4 @@ ariadne = "0.2.0"
 chumsky = "0.8.0"
 
 [patch.crates-io]
-chumsky = {git = "https://github.com/zesterer/chumsky", tag = "1.0.0-alpha.0"}
+chumsky = {git = "https://github.com/zesterer/chumsky", rev = "2d971c6"}

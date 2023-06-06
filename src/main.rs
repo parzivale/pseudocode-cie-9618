@@ -1,7 +1,7 @@
 use std::{env, error::Error, fs};
 
 use ariadne::Source;
-use pseudocode::Interpreter;
+use pseudocode_cie_9618::Interpreter;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let code = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))

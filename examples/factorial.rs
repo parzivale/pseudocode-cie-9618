@@ -1,6 +1,6 @@
 use std::fs;
 
-use pseudocode::prelude::*;
+use pseudocode_cie_9618::prelude::*;
 
 fn main() {
     let code = fs::read_to_string("tests/data/factorial.pseudo").unwrap();

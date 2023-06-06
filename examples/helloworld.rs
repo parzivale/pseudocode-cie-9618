@@ -1,4 +1,4 @@
-use pseudocode::prelude::*;
+use pseudocode_cie_9618::prelude::*;
 
 fn main() {
     let code = "OUTPUT \"HELLO World\"".to_string();

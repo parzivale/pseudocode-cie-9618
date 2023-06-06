@@ -1,4 +1,4 @@
-use pseudocode::prelude::*;
+use pseudocode_cie_9618::prelude::*;
 use std::fs;
 
 #[derive(Default)]

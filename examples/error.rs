@@ -1,4 +1,4 @@
-use pseudocode::prelude::*;
+use pseudocode_cie_9618::prelude::*;
 
 fn main() {
     let code = "DECLARE i:INTEGER\ni<-\"I am an error!\"".to_string();
