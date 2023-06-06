@@ -2,6 +2,9 @@
 name = "pseudocode_cie_9618"
 version = "0.1.0"
 edition = "2021"
+liscence = "GPL-2.0"
+description = "A simple pseudocode interpreter for the cie 9618 spec"
+repository = "https://github.com/parzivale/pseudocode-cie-9618"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
