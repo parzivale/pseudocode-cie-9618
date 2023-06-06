@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 ariadne = "0.2.0"
-chumsky = {git = "https://github.com/zesterer/chumsky", version = "0.8.0"}
+chumsky = {git = "https://github.com/zesterer/chumsky"}
 
 [patch."https://github.com/zesterer/chumsky"]
 chumsky = {git = "https://github.com/zesterer/chumsky", rev = "2d971c6"}
