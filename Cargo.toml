@@ -2,7 +2,7 @@
 name = "pseudocode_cie_9618"
 version = "0.1.0"
 edition = "2021"
-liscense = "GPL-2.0-or-later"
+license = "GPL-2.0-or-later"
 description = "A simple pseudocode interpreter for the cie 9618 spec"
 repository = "https://github.com/parzivale/pseudocode-cie-9618"
 
