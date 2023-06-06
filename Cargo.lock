@@ -38,7 +38,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "chumsky"
 version = "0.8.0"
-source = "git+https://github.com/zesterer/chumsky?rev=2d971c6#2d971c694736fcaac3e295c10932632f0fba1028"
+source = "git+https://github.com/zesterer/chumsky?rev=2d971c694736fcaac3e295c10932632f0fba1028#2d971c694736fcaac3e295c10932632f0fba1028"
 dependencies = [
  "hashbrown",
  "stacker",

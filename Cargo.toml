@@ -10,4 +10,4 @@ ariadne = "0.2.0"
 chumsky = "0.8.0"
 
 [patch.crates-io]
-chumsky = {git = "https://github.com/zesterer/chumsky", rev = "2d971c6"}
+chumsky = {git = "https://github.com/zesterer/chumsky", rev = "2d971c694736fcaac3e295c10932632f0fba1028"}
