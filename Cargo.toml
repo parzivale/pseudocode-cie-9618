@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 ariadne = "0.2.0"
-chumsky = "0.8.0"
+chumsky = "0.9.0"
 
 [patch.crates-io]
 chumsky = {git = "https://github.com/zesterer/chumsky", rev = "2d971c6"}
